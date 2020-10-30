@@ -6,7 +6,7 @@ Going along the lines of what it takes to design an IP that adheres to the
 [Comportability Specifications](/doc/rm/comportability_specification),
 we attempt to standardize the DV methodology for developing the IP level
 testbench environment as well by following the same approach. This document describes
-the Comportable IP (CIP) library, which is a complete UVM enviromnent framework that
+the Comportable IP (CIP) library, which is a complete UVM environment framework that
 each IP level environment components can extend from to get started with DV. The goal
 here is to maximize code reuse across all test benches so that we can improve the
 efficiency and time to market. The features described here are not exhaustive,
@@ -81,8 +81,8 @@ method is required to be overridden to create those objects as well.
 
 We make all downstream interface agent cfg handles as a part of IP extension of
 cip_base_env_cfg so that all settings for the env and all downstream agents are
-avaiable within the env cfg handle. Since the env cfg handle is passed to all cip
-components, all those settings are also accesible.
+available within the env cfg handle. Since the env cfg handle is passed to all cip
+components, all those settings are also accessible.
 
 ### cip_base_env_cov
 This is the base coverage object that contain all functional coverpoints and
@@ -189,13 +189,24 @@ Some examples:
 * **task cfg_interrupts, check_interrupts**: All interrupt CSRs are standardized
   according to the comportability spec, which allows us to create common tasks
   to turn on / off interrupts as well as check them.
-* **task run_stress_all_with_rand_reset_vseq**: This is a common virtual
-  sequence based on the stress_all virtual sequence. This virtual sequence
-  will randomly reset the stress_all sequence, then it will check if all
-  the readable registers are reset to the correct value.
+* **task run_tl_errors_vseq**: This task will test all kinds of TileLink error
+  cases, including unmapped address error, protocol error, memory access error
+  etc. All the items sent in this task will trigger d_error and won't change the
+  CSR/memory value.
+* **task run_stress_all_with_rand_reset_vseq**: This task runs 3 parallel threads,
+  which are ip_stress_all_vseq, run_tl_errors_vseq and reset sequence. After
+  reset occurs, the other threads will be killed and then all the CSRs will be read
+  for check. This task runs multiple iterations to ensure DUT won't be broken after
+  reset and TL errors.
   To ensure the reset functionality works correctly, user will have to disable
   any internal reset from the stress_all sequence. Below is an example of
   disabling internal reset in `hmac_stress_all_vseq.sv`:
+* **task run_same_csr_outstanding_vseq**: This task tests the same CSR with
+  non-blocking accesses as the regular CSR sequences don't cover that due to
+  limitation of uvm_reg.
+* **task run_mem_partial_access_vseq**: This task tests the partial access to the
+  memories by randomizing mask, size, and the 2 LSB bits of the address. It also runs
+  with non-blocking access enabled.
   ```
   // randomly trigger internal dut_init reset sequence
   // disable any internal reset if used in stress_all_with_rand_reset vseq

@@ -46,7 +46,7 @@ class rv_timer_base_vseq extends cip_base_vseq #(
     `DV_CHECK_LT_FATAL(timer, NUM_TIMERS)
     ctrl_rg = ral.get_reg_by_name($sformatf("ctrl"));
     `DV_CHECK_NE_FATAL(ctrl_rg, null)
-    active_fld = ctrl_rg.get_field_by_name($sformatf("active%0d", timer));
+    active_fld = ctrl_rg.get_field_by_name($sformatf("active_%0d", timer));
     `DV_CHECK_NE_FATAL(active_fld, null)
     active_fld.set(enable);
     csr_update(.csr(ctrl_rg));
@@ -105,7 +105,7 @@ class rv_timer_base_vseq extends cip_base_vseq #(
     `DV_CHECK_LT_FATAL(timer, NUM_TIMERS)
     intr_en_rg = ral.get_reg_by_name($sformatf("intr_enable%0d", hart));
     `DV_CHECK_NE_FATAL(intr_en_rg, null)
-    timer_intr_en_fld = intr_en_rg.get_field_by_name($sformatf("ie%0d", timer));
+    timer_intr_en_fld = intr_en_rg.get_field_by_name($sformatf("ie_%0d", timer));
     `DV_CHECK_NE_FATAL(timer_intr_en_fld, null)
     timer_intr_en_fld.set(enable);
     csr_update(.csr(intr_en_rg));
@@ -124,7 +124,7 @@ class rv_timer_base_vseq extends cip_base_vseq #(
     `DV_CHECK_LT_FATAL(timer, NUM_TIMERS)
     intr_state_rg = ral.get_reg_by_name($sformatf("intr_state%0d", hart));
     `DV_CHECK_NE_FATAL(intr_state_rg, null)
-    timer_intr_state_fld = intr_state_rg.get_field_by_name($sformatf("is%0d", timer));
+    timer_intr_state_fld = intr_state_rg.get_field_by_name($sformatf("is_%0d", timer));
     `DV_CHECK_NE_FATAL(timer_intr_state_fld, null)
     void'(timer_intr_state_fld.predict(.value(exp_intr_state), .kind(UVM_PREDICT_DIRECT)));
     csr_rd_check(.ptr(intr_state_rg), .compare_vs_ral(1));
@@ -137,14 +137,22 @@ class rv_timer_base_vseq extends cip_base_vseq #(
     uvm_reg         intr_state_rg;
     uvm_reg_field   is_fld;
     bit [TL_DW-1:0] status;
+    bit [TL_DW-1:0] wr_value;
     `DV_CHECK_LT_FATAL(hart, NUM_HARTS)
     `DV_CHECK_LT_FATAL(timer, NUM_TIMERS)
+    // randomly clear the intr by writing intr_state or mtimecmp
     intr_state_rg = ral.get_reg_by_name($sformatf("intr_state%0d", hart));
     `DV_CHECK_NE_FATAL(intr_state_rg, null)
-    is_fld = intr_state_rg.get_field_by_name($sformatf("is%0d", timer));
-    `DV_CHECK_NE_FATAL(is_fld, null)
-    is_fld.set(1);
-    csr_update(.csr(intr_state_rg));
+
+    if ($urandom_range(0, 1)) begin
+      wr_value = 1 << timer;
+      csr_wr(.csr(intr_state_rg), .value(wr_value));
+    end else begin
+      wr_value = $urandom();
+      set_compare_val(hart, timer, wr_value);
+      // wait one clk cycle then check intr, to ensure get the sticky interrupt value
+      cfg.clk_rst_vif.wait_clks(1);
+    end
     csr_rd(.ptr(intr_state_rg), .value(status));
   endtask
 

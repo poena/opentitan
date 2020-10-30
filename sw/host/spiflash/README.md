@@ -1,8 +1,7 @@
 # SPI Flash
 
 `spiflash` is a tool used to update the firmware stored in OpenTitan's embedded flash.
-The tool resets OpenTitan and signals the boot ROM to enter bootstrap mode
-before sending the update payload.
+The tool resets OpenTitan and signals the boot ROM to enter bootstrap mode before sending the update payload.
 
 Currently, the tool supports both Verilator and FPGA targets.
 
@@ -21,47 +20,36 @@ Build command for tool:
 ```console
 $ cd ${REPO_TOP}
 $ ./meson_init.sh
-$ ninja -C build-out/sw/fpga sw/host/spiflash/spiflash_export
+$ ninja -C build-out sw/host/spiflash/spiflash_export
 ```
 
 ## Setup instructions for Verilator and FPGA
 Please refer to [verilator]({{< relref "doc/ug/getting_started_verilator" >}}) and [fpga]({{< relref "doc/ug/getting_started_fpga" >}}) docs for more information.
 
-## Build boot ROM and demo program
+## Build target program
 
-_If building for verilator, build in `build-out/sw/sim-verilator` instead._
+In this example, we build the `hello_world` as the target program.
+Set `${FLASH_BIN}` to the path to the generated binary.
 
-Build `boot_rom`:
 ```console
 $ cd ${REPO_TOP}
-$ ./meson_init.sh
-$ ninja -C build-out/sw/fpga sw/device/boot_rom/boot_rom_export
+$ ninja -C build-out sw/device/examples/hello_world/hello_world_export_${DEVICE}
 ```
 
-Build the `hello_world` program:
-```console
-$ cd ${REPO_TOP}
-$ ninja -C build-out/sw/fpga sw/device/examples/hello_world/hello_world_export
-```
+Where ${DEVICE} is one of 'sim_verilator' or 'fpga_nexysvideo'
 
 ## Run the tool in Verilator
 
-Run Verilator with boot_rom enabled:
+Run Verilator with boot_rom enabled as described in the [verilator]({{< relref "doc/ug/getting_started_verilator" >}}) getting started guide.
 
-```console
-$ cd ${REPO_TOP}
-$ build/lowrisc_systems_top_earlgrey_verilator_0.1/sim-verilator/Vtop_earlgrey_verilator \
-  --rominit build-bin/sw/device/sim-verilator/boot_rom/boot_rom.vmem
-```
-
-Run spiflash. In this example we use SPI device `/dev/pts/3` as an example.
+Run spiflash.
+In this example we use SPI device `/dev/pts/3` as an example.
 After the transmission is complete, you should be able to see the hello_world output in the UART console.
 
 ```console
 $ cd ${REPO_TOP}
-$ build-bin/sw/host/spiflash/spiflash \
-  --input     build-bin/sw/device/sim-verilator/examples/hello_world/hello_world.bin \
-  --verilator /dev/pts/3
+$ build-bin/sw/host/spiflash/spiflash --input ${FLASH_BIN} \
+   --verilator /dev/pts/3
 ```
 
 ## Run the tool in FPGA
@@ -73,6 +61,15 @@ If there are two FPGAs or multiple valid targets attached at the same time, it i
 
 ```console
 $ cd ${REPO_TOP}
-$ build-bin/sw/host/spiflash/spiflash \
-  --input build-bin/sw/device/fpga/examples/hello_world/hello_world.bin
+$ build-bin/sw/host/spiflash/spiflash --input ${FLASH_BIN}
+```
+
+The tool supports overriding the FTDI USB device ID and serial number as follows:
+
+```console
+$ cd ${REPO_TOP}
+# --dev-id: "vendor_id:product_id" in hex string format.
+# --dev-sn: Serial number in string format as returned by lsusb command.
+$ build-bin/sw/host/spiflash/spiflash  --dev-id=0403:6014 --dev-sn=FT2U2SK1 \
+   --input=${FLASH_BIN}
 ```

@@ -1,3 +1,6 @@
+// Copyright lowRISC contributors.
+// Licensed under the Apache License, Version 2.0, see LICENSE for details.
+// SPDX-License-Identifier: Apache-2.0
 { name: "main",
   type: "xbar",
   clock_primary: "clk_main_i", // Main clock, used in sockets
@@ -51,19 +54,7 @@
       reset:     "rst_main_ni",
       pipeline:  "false",
     },
-    { name:      "uart",
-      type:      "device",
-      clock:     "clk_fixed_i",
-      reset:     "rst_fixed_ni",
-      pipeline_byp: "false"
-    },
-    { name:      "gpio",
-      type:      "device",
-      clock:     "clk_fixed_i",
-      reset:     "rst_fixed_ni",
-      pipeline_byp: "false"
-    },
-    { name:      "spi_device",
+    { name:      "peri",
       type:      "device",
       clock:     "clk_fixed_i",
       reset:     "rst_fixed_ni",
@@ -73,12 +64,6 @@
       type:      "device",
       clock:     "clk_main_i",
       reset:     "rst_main_ni",
-      pipeline_byp: "false"
-    },
-    { name:      "rv_timer",
-      type:      "device",
-      clock:     "clk_fixed_i",
-      reset:     "rst_fixed_ni",
       pipeline_byp: "false"
     },
     { name:      "hmac",
@@ -98,8 +83,10 @@
       clock:     "clk_main_i",
       reset:     "rst_main_ni",
       inst_type: "rv_plic",
-      base_addr: "0x40090000",
-      size_byte: "0x1000",
+      addr_range: [{
+        base_addr: "0x40090000",
+        size_byte: "0x1000",
+        }],
       pipeline_byp: "false"
     },
     { name:      "pinmux",
@@ -107,8 +94,21 @@
       clock:     "clk_main_i",
       reset:     "rst_fixed_ni",
       inst_type: "pinmux",
-      base_addr: "0x40070000",
-      size_byte: "0x1000",
+      addr_range: [{
+        base_addr: "0x40070000",
+        size_byte: "0x1000",
+        }],
+      pipeline_byp: "false"
+    },
+    { name:      "padctrl",
+      type:      "device",
+      clock:     "clk_main_i",
+      reset:     "rst_fixed_ni",
+      inst_type: "padctrl",
+      addr_range: [{
+        base_addr: "0x40160000",
+        size_byte: "0x1000",
+        }],
       pipeline_byp: "false"
     },
     { name:      "alert_handler",
@@ -125,12 +125,24 @@
       inst_type: "nmi_gen",
       pipeline_byp: "false"
     }
+    { name:      "otbn",
+      type:      "device",
+      clock:     "clk_main_i"
+      reset:     "rst_main_ni"
+      pipeline_byp: "false"
+    },
+    { name:      "keymgr",
+      type:      "device",
+      clock:     "clk_main_i"
+      reset:     "rst_main_ni"
+      pipeline_byp: "false"
+    },
   ],
   connections: {
     corei:  ["rom", "debug_mem", "ram_main", "eflash"],
-    cored:  ["rom", "debug_mem", "ram_main", "eflash", "uart", "gpio", "spi_device", "flash_ctrl",
-    "rv_timer", "aes", "hmac", "rv_plic", "pinmux", "alert_handler", "nmi_gen"],
-    dm_sba: ["rom",              "ram_main", "eflash", "uart", "gpio", "spi_device", "flash_ctrl",
-    "rv_timer", "aes", "hmac", "rv_plic", "pinmux", "alert_handler", "nmi_gen"],
+    cored:  ["rom", "debug_mem", "ram_main", "eflash", "peri", "flash_ctrl",
+    "aes", "hmac", "rv_plic", "pinmux", "padctrl", "alert_handler", "nmi_gen", "otbn", "keymgr"],
+    dm_sba: ["rom",              "ram_main", "eflash", "peri", "flash_ctrl",
+    "aes", "hmac", "rv_plic", "pinmux", "padctrl", "alert_handler", "nmi_gen", "otbn"],
   },
 }

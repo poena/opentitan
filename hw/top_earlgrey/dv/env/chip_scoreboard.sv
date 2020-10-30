@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 
-class chip_scoreboard extends dv_base_scoreboard #(
+class chip_scoreboard extends cip_base_scoreboard #(
     .CFG_T(chip_env_cfg),
     .RAL_T(chip_reg_block),
     .COV_T(chip_env_cov)
@@ -47,6 +47,11 @@ class chip_scoreboard extends dv_base_scoreboard #(
       jtag_fifo.get(item);
       `uvm_info(`gfn, $sformatf("received jtag item:\n%0s", item.sprint()), UVM_HIGH)
     end
+  endtask
+
+  // TODO, may add some checking later
+  virtual task process_tl_access(tl_seq_item item, tl_channels_e channel = DataChannel);
+    return;
   endtask
 
   virtual function void reset(string kind = "HARD");

@@ -1,0 +1,182 @@
+// Copyright lowRISC contributors.
+// Licensed under the Apache License, Version 2.0, see LICENSE for details.
+// SPDX-License-Identifier: Apache-2.0
+{ name: "otbn"
+  clock_primary: "clk_i"
+  bus_device: "tlul"
+  bus_host: "none"
+  param_list: [
+    { name:    "RegFile",
+      type:    "otbn_pkg::regfile_e",
+      default: "otbn_pkg::RegFileFF",
+      desc:    "Selection of the register file implementation. See otbn_pkg.sv."
+      local:   "false",
+      expose:  "true"
+    }
+  ]
+  interrupt_list: [
+    { name: "done"
+      desc: "OTBN has completed the operation"
+    }
+    { name: "err"
+      desc: "An error occurred. Read the ERR_CODE register for error details."
+    }
+  ]
+  alert_list: [
+    { name: "imem_uncorrectable"
+      desc: "Uncorrectable error in the instruction memory detected."
+    }
+    { name: "dmem_uncorrectable"
+      desc: "Uncorrectable error in the data memory detected."
+    }
+    { name: "reg_uncorrectable"
+      desc: "Uncorrectable error in one of the register files detected."
+    }
+  ]
+
+  inter_signal_list: [
+    // TODO: CSRNG isn't committed yet, depends on assumed interface done for
+    // AES in https://github.com/lowRISC/opentitan/pull/2140.
+    /*{ name:    "entropy",
+      type:    "req_rsp",
+      act:     "req",
+      package: "csrng_pkg",
+      struct:  "csrng_entropy",
+      width:   "1"
+    },*/
+
+    // OTBN is not performing any operation and can be clock/power-gated.
+    { name:    "idle",
+      type:    "uni",
+      struct:  "logic",
+      width:   "1",
+      act:     "req",
+    },
+  ],
+
+  regwidth: "32"
+  registers: [
+    { name: "CMD"
+      desc: "command register",
+      swaccess: "r0w1c",
+      hwaccess: "hro",
+      hwext: "true",
+      hwqe:  "true",
+      fields: [
+        { bits: "0"
+          name: "start"
+          desc: '''
+            Start the operation
+
+            The completion is signalled by the done interrupt.
+          '''
+          tags: [// Do not randomly start big num operations
+                 "excl:CsrNonInitTests:CsrExclWrite"],
+        }
+        { bits: "1",
+          name: "dummy",
+          desc: '''
+            Reggen doesn't generate sub-fields with only a single field
+            specified; instead, the whole register is taken as a field, leading
+            to signals like `hw2reg.status.d` instead of
+            `hw2reg.status.start.d`. Since we expect to add more commands later,
+            we force the generation of fields with this dummy field for now.
+          '''
+        }
+      ],
+    }
+    { name: "STATUS",
+      desc: "Status",
+      swaccess: "ro",
+      hwaccess: "hwo",
+      hwext: "true",
+      fields: [
+        { bits: "0",
+          name: "busy",
+          desc: "OTBN is performing an operation."
+        }
+        { bits: "1",
+          name: "dummy",
+          desc: '''
+            See !!CMD.dummy for details.
+          '''
+        }
+      ]
+    } // register : status
+    { name: "ERR_CODE",
+      desc: "Error Code",
+      swaccess: "ro",
+      hwaccess: "hwo",
+      fields: [
+        { bits: "31:0",
+          name: "err_code",
+          desc: '''
+            The error cause if an error occurred.
+
+            Software should read this register before clearing the err
+            interrupt to avoid race conditions.
+
+            Possible values:
+
+            - 0x0 (ErrCodeNoError):     No error occurred.
+            - 0x1 (ErrCodeBadDataAddr): Load or store to invalid address
+          '''
+        }
+      ]
+    } // register : err_code
+    { name: "START_ADDR",
+      desc: "Start byte address in the instruction memory",
+      swaccess: "wo",
+      hwaccess: "hro",
+      fields: [
+        { bits: "31:0",
+          name: "start_addr",
+          resval: 0,
+          desc: '''
+            Byte address in the instruction memory OTBN starts to execute from
+            when instructed to do so with the !!CMD.start .
+          '''
+        }
+      ]
+    } // register : start_addr
+
+
+    // Give IMEM and DMEM 1 MB address space, each, to allow for easy expansion
+    // of the actual IMEM and DMEM sizes without changing the address map.
+    { skipto: "0x100000" }
+
+    { window: {
+        name: "IMEM"
+        items: "1024" // 4 kB
+        swaccess: "rw",
+        byte-write: "false",
+        desc: '''
+          Instruction Memory.
+
+          This register should only be accesed while OTBN is not busy, as indicated by the !!STATUS.busy flag.
+          Accesses while OTBN is busy are blocking.
+
+          TODO: The exact behavior is yet to be determined, see https://github.com/lowRISC/opentitan/issues/2696 for details.
+        '''
+      }
+    }
+
+    { skipto: "0x200000" }
+
+    { window: {
+        name: "DMEM"
+        items: "1024" // 4 kB
+        swaccess: "rw",
+        byte-write: "false",
+        desc: '''
+          Data Memory.
+
+          This register should only be accesed while OTBN is not busy, as indicated by the !!STATUS.busy flag.
+          Accesses while OTBN is busy are blocking.
+
+          TODO: The exact behavior is yet to be determined, see https://github.com/lowRISC/opentitan/issues/2696 for details.
+        '''
+      }
+    }
+  ]
+}

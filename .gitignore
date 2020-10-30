@@ -1,6 +1,8 @@
 *~
 *.bak
+tags
 __pycache__
+/.vscode
 opentitan-docs
 
 # fusesoc result
@@ -43,3 +45,10 @@ ascentlint.rpt
 # verilator/gtkwave waveforms and wave lists
 *.fst
 *.gtkw
+
+# Foundry library
+hw/foundry/
+
+# Local Tock checkout
+sw/device/tock/tock_local
+sw/device/tock/tock/Cargo.toml

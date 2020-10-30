@@ -11,9 +11,9 @@ title: "SPI Device DV Plan"
   * Verify TileLink device protocol compliance with an SVA based testbench
 
 ## Current status
-* [Design & verification stage]({{< relref "doc/project/hw_dashboard" >}})
-  * [HW development stages]({{< relref "doc/project/hw_stages.md" >}})
-* DV regression results dashboard (link TBD)
+* [Design & verification stage]({{< relref "hw" >}})
+  * [HW development stages]({{< relref "doc/project/development_stages.md" >}})
+* [Simulation results](https://reports.opentitan.org/hw/ip/spi_device/dv/latest/results.html)
 
 ## Design features
 For detailed information on SPI Device design features, please see the [SPI_device design specification]({{< relref "hw/ip/spi_device/doc" >}}).
@@ -43,9 +43,8 @@ The following utilities provide generic helper tasks and functions to perform ac
 All common types and methods defined at the package level can be found in
 `spi_device_env_pkg`. Some of them in use are:
 ```systemverilog
-parameter uint SPI_DEVICE_ADDR_MAP_SIZE = 4096;
-parameter uint SRAM_OFFSET              = 'h800;
-parameter uint SRAM_SIZE                = 2048;
+parameter uint SRAM_OFFSET = 'h800;
+parameter uint SRAM_SIZE   = 2048;
 ```
 
 ### TL_agent
@@ -60,10 +59,9 @@ Following special behavior is supported in spi_host_driver
 * During data transfer, there may be very long delay between each bit or byte of data
 
 ### UVM RAL Model
-The SPI Device RAL model is created with the `hw/dv/tools/gen_ral_pkg.py` wrapper script at the start of the simulation automatically and is placed in the build area, along with a corresponding `fusesoc` core file.
-The wrapper script invokes the [regtool.py]({{< relref "util/reggen/README.md" >}}) script from within to generate the RAL model.
+The SPI Device RAL model is created with the [`ralgen`]({{< relref "hw/dv/tools/ralgen/README.md" >}}) FuseSoC generator script automatically when the simulation is at the build stage.
 
-It can be created manually by running `make ral` command from the `dv` area.
+It can be created manually by invoking [`regtool`]({{< relref "util/reggen/README.md" >}}):
 
 ### Stimulus strategy
 #### Test sequences
@@ -101,8 +99,7 @@ We are using our in-house developed [regression tool]({{< relref "hw/dv/tools/RE
 Please take a look at the link for detailed information on the usage, capabilities, features and known issues.
 Here's how to run a basic sanity test:
 ```console
-$ cd hw/ip/spi_device/dv
-$ make TEST_NAME=spi_device_sanity
+$ $REPO_TOP/util/dvsim/dvsim.py $REPO_TOP/hw/ip/spi_device/dv/spi_device_sim_cfg.hjson -i spi_device_sanity
 ```
 
 ## Testplan

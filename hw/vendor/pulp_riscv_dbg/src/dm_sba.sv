@@ -77,7 +77,7 @@ module dm_sba #(
 
     state_d = state_q;
 
-    case (state_q)
+    unique case (state_q)
       Idle: begin
         // debugger requested a read
         if (sbaddress_write_valid_i && sbreadonaddr_i)  state_d = Read;
@@ -96,7 +96,7 @@ module dm_sba #(
         req = 1'b1;
         we  = 1'b1;
         // generate byte enable mask
-        case (sbaccess_i)
+        unique case (sbaccess_i)
           3'b000: begin
             be[be_idx] = '1;
           end
@@ -104,11 +104,11 @@ module dm_sba #(
             be[int'({be_idx[$high(be_idx):1], 1'b0}) +: 2] = '1;
           end
           3'b010: begin
-            if (BusWidth == 32'd64) be[int'({be_idx[$high(be_idx)], 2'b0}) +: 4] = '1;
+            if (BusWidth == 32'd64) be[int'({be_idx[$high(be_idx)], 2'h0}) +: 4] = '1;
             else                    be = '1;
           end
           3'b011: be = '1;
-          default:;
+          default: ;
         endcase
         if (gnt) state_d = WaitWrite;
       end
@@ -117,7 +117,7 @@ module dm_sba #(
         if (sbdata_valid_o) begin
           state_d = Idle;
           // auto-increment address
-          if (sbautoincrement_i) sbaddress_o = sbaddress_i + (32'b1 << sbaccess_i);
+          if (sbautoincrement_i) sbaddress_o = sbaddress_i + (32'h1 << sbaccess_i);
         end
       end
 
@@ -125,11 +125,11 @@ module dm_sba #(
         if (sbdata_valid_o) begin
           state_d = Idle;
           // auto-increment address
-          if (sbautoincrement_i) sbaddress_o = sbaddress_i + (32'b1 << sbaccess_i);
+          if (sbautoincrement_i) sbaddress_o = sbaddress_i + (32'h1 << sbaccess_i);
         end
       end
 
-      default:;
+      default: state_d = Idle; // catch parasitic state
     endcase
 
     // handle error case

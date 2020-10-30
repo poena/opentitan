@@ -24,6 +24,8 @@
 //       [2] https://users.ece.cmu.edu/~koopman/lfsr/
 //       [3] https://www.xilinx.com/support/documentation/application_notes/xapp052.pdf
 
+`include "prim_assert.sv"
+
 module prim_lfsr #(
   // Lfsr Type, can be FIB_XNOR or GAL_XOR
   parameter                    LfsrType     = "GAL_XOR",
@@ -37,6 +39,10 @@ module prim_lfsr #(
   parameter logic [LfsrDw-1:0] DefaultSeed  = LfsrDw'(1),
   // Custom polynomial coeffs
   parameter logic [LfsrDw-1:0] CustomCoeffs = '0,
+  // If StatePermEn is set to 1, the custom permutation specified via StatePerm is applied
+  // to the state output, in order to break linear shifting patterns of the LFSR.
+  parameter bit                      StatePermEn = 1'b0,
+  parameter logic [LfsrDw-1:0][31:0] StatePerm   = '0,
   // Enable this for DV, disable this for long LFSRs in FPV
   parameter bit                MaxLenSVA    = 1'b1,
   // Can be disabled in cases where seed and entropy
@@ -56,7 +62,7 @@ module prim_lfsr #(
 
   // automatically generated with get-lfsr-coeffs.py script
   localparam int unsigned GAL_XOR_LUT_OFF = 4;
-  localparam logic [63:0] GAL_XOR_COEFFS [0:60] =
+  localparam logic [63:0] GAL_XOR_COEFFS [61] =
     '{ 64'h9,
        64'h12,
        64'h21,
@@ -121,7 +127,7 @@ module prim_lfsr #(
 
   // automatically generated with get-lfsr-coeffs.py script
   localparam int unsigned FIB_XNOR_LUT_OFF = 3;
-  localparam logic [167:0] FIB_XNOR_COEFFS [0:165] =
+  localparam logic [167:0] FIB_XNOR_COEFFS [166] =
     '{ 168'h6,
        168'hC,
        168'h14,
@@ -361,7 +367,13 @@ module prim_lfsr #(
                   (lfsr_en_i)           ? next_lfsr_state :
                                           lfsr_q;
 
-  assign state_o  = lfsr_q[StateOutDw-1:0];
+  if (StatePermEn) begin : gen_state_perm
+    for (genvar k = 0; k < StateOutDw; k++) begin : gen_perm_loop
+      assign state_o[k] = lfsr_q[StatePerm[k]];
+    end
+  end else begin : gen_no_state_perm
+    assign state_o  = lfsr_q[StateOutDw-1:0];
+  end
 
   always_ff @(posedge clk_i or negedge rst_ni) begin : p_reg
     if (!rst_ni) begin
@@ -376,8 +388,11 @@ module prim_lfsr #(
   // shared assertions //
   ///////////////////////
 
-  `ASSERT_KNOWN(DataKnownO_A, state_o, clk_i, !rst_ni)
+  `ASSERT_KNOWN(DataKnownO_A, state_o)
 
+// the code below is not meant to be synthesized,
+// but it is intended to be used in simulation and FPV
+`ifndef SYNTHESIS
   function automatic logic[LfsrDw-1:0] compute_next_state(logic[LfsrDw-1:0]    lfsrcoeffs,
                                                           logic[EntropyDw-1:0] entropy,
                                                           logic[LfsrDw-1:0]    state);
@@ -410,30 +425,47 @@ module prim_lfsr #(
     return state;
   endfunction : compute_next_state
 
+  // check whether next state is computed correctly
+  `ASSERT(NextStateCheck_A, lfsr_en_i && !seed_en_i |=> lfsr_q ==
+    compute_next_state(coeffs, $past(entropy_i,1), $past(lfsr_q,1)))
+
+  // Only check this if enabled.
+  if (StatePermEn) begin : gen_perm_check
+    // Check that the supplied permutation is valid.
+    logic [LfsrDw-1:0] lfsr_perm_test;
+    initial begin : p_perm_check
+      lfsr_perm_test = '0;
+      for (int k = 0; k < LfsrDw; k++) begin
+        lfsr_perm_test[StatePerm[k]] = 1'b1;
+      end
+      // All bit positions must be marked with 1.
+      `ASSERT_I(PermutationCheck_A, &lfsr_perm_test)
+    end
+  end
+
+`endif
+
   `ASSERT_INIT(InputWidth_A, LfsrDw >= EntropyDw)
   `ASSERT_INIT(OutputWidth_A, LfsrDw >= StateOutDw)
 
   // MSB must be one in any case
-  `ASSERT(CoeffCheck_A, coeffs[LfsrDw-1], clk_i, !rst_ni)
-
-  // check whether next state is computed correctly
-  `ASSERT(NextStateCheck_A, lfsr_en_i && !seed_en_i |=> lfsr_q ==
-    compute_next_state(coeffs, $past(entropy_i,1), $past(lfsr_q,1)),
-    clk_i, !rst_ni )
+  `ASSERT(CoeffCheck_A, coeffs[LfsrDw-1])
 
   // output check
-  `ASSERT_KNOWN(OutputKnown_A, state_o, clk_i, !rst_ni)
-  `ASSERT(OutputCheck_A, state_o == StateOutDw'(lfsr_q), clk_i, !rst_ni)
-
+  `ASSERT_KNOWN(OutputKnown_A, state_o)
+  if (!StatePermEn) begin : gen_output_sva
+    `ASSERT(OutputCheck_A, state_o == StateOutDw'(lfsr_q))
+  end
   // if no external input changes the lfsr state, a lockup must not occur (by design)
   //`ASSERT(NoLockups_A, (!entropy_i) && (!seed_en_i) |=> !lockup, clk_i, !rst_ni)
-  `ASSERT(NoLockups_A, lfsr_en_i && !entropy_i && !seed_en_i |=> !lockup, clk_i, !rst_ni)
+  `ASSERT(NoLockups_A, lfsr_en_i && !entropy_i && !seed_en_i |=> !lockup)
 
   // this can be disabled if unused in order to not distort coverage
   if (ExtSeedSVA) begin : gen_ext_seed_sva
     // check that external seed is correctly loaded into the state
-    `ASSERT(ExtDefaultSeedInputCheck_A, seed_en_i |=> lfsr_q == $past(seed_i),
-        clk_i, !rst_ni)
+    // rst_ni is used directly as part of the pre-condition since the usage of rst_ni
+    // in disable_iff is unsampled.  See #1985 for more details
+    `ASSERT(ExtDefaultSeedInputCheck_A, (seed_en_i && rst_ni) |=> lfsr_q == $past(seed_i))
   end
 
   // if the external seed mechanism is not used,
@@ -441,24 +473,12 @@ module prim_lfsr #(
   // in order to not distort coverage, this SVA can be disabled in such cases
   if (LockupSVA) begin : gen_lockup_mechanism_sva
     // check that a stuck LFSR is correctly reseeded
-    `ASSERT(LfsrLockupCheck_A, lfsr_en_i && lockup && !seed_en_i |=> !lockup,
-        clk_i, !rst_ni)
+    `ASSERT(LfsrLockupCheck_A, lfsr_en_i && lockup && !seed_en_i |=> !lockup)
   end
 
-  // the code below is not meant to be synthesized,
-  // but it is intended to be used in simulation and FPV
-  // the formal tool defines SYNTHESIS, hence this workaround
-`ifdef FPV_ON
-  localparam bit MaxLenSVALocal = MaxLenSVA;
-`else
-`ifndef SYNTHESIS
-  localparam bit MaxLenSVALocal = MaxLenSVA;
-`else
-  localparam bit MaxLenSVALocal = 1'b0;
-`endif
-`endif
+  if (MaxLenSVA) begin : gen_max_len_sva
 
-  if (MaxLenSVALocal) begin : gen_max_len_sva
+`ifndef SYNTHESIS
     // the code below is a workaround to enable long sequences to be checked.
     // some simulators do not support SVA sequences longer than 2**32-1.
     logic [LfsrDw-1:0] cnt_d, cnt_q;
@@ -487,6 +507,7 @@ module prim_lfsr #(
         clk_i, !rst_ni || perturbed_q)
     `ASSERT(MaximalLengthCheck1_A, cnt_q != 0 |-> lfsr_q != DefaultSeed,
         clk_i, !rst_ni || perturbed_q)
+`endif
   end
 
 endmodule

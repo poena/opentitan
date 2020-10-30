@@ -12,18 +12,17 @@ class spi_device_scoreboard extends cip_base_scoreboard #(.CFG_T (spi_device_env
   uvm_tlm_analysis_fifo #(spi_item) device_spi_data_fifo;
 
   // mem model to save expected value
-  mem_model tx_mem;
-  mem_model rx_mem;
-  uint tx_rptr_exp;
-  uint rx_wptr_exp;
+  local mem_model tx_mem;
+  local mem_model rx_mem;
+  local uint tx_rptr_exp;
+  local uint rx_wptr_exp;
+
+  // expected values
+  local bit [NumSpiDevIntr-1:0] intr_exp;
 
   // tx/rx fifo, size is 2 words
-  bit [31:0] tx_word_fifo[$];
-  bit [31:0] rx_word_fifo[$];
-
-  // local queues to hold incoming packets pending comparison
-  spi_item host_spi_data_q[$];
-  spi_item device_spi_data_q[$];
+  local bit [31:0] tx_word_q[$];
+  local bit [31:0] rx_word_q[$];
 
   `uvm_component_new
 
@@ -71,8 +70,6 @@ class spi_device_scoreboard extends cip_base_scoreboard #(.CFG_T (spi_device_env
     bit     write           = item.is_write();
     uvm_reg_addr_t csr_addr = get_normalized_addr(item.a_addr);
 
-    super.process_tl_access(item, channel);
-    if (is_tl_err_exp || is_tl_unmapped_addr) return;
     // if access was to a valid csr, get the csr handle
     if (csr_addr inside {cfg.csr_addrs}) begin
       csr = ral.default_map.get_reg_by_offset(csr_addr);
@@ -126,6 +123,17 @@ class spi_device_scoreboard extends cip_base_scoreboard #(.CFG_T (spi_device_env
           update_rx_mem_fifo_and_wptr();
         end
       end
+      "intr_test": begin
+        if (write && channel == AddrChannel) begin
+          bit [TL_DW-1:0] intr_en = ral.intr_enable.get_mirrored_value();
+          intr_exp |= item.a_data;
+          if (cfg.en_cov) begin
+            foreach (intr_exp[i]) begin
+              cov.intr_test_cg.sample(i, item.a_data[i], intr_en[i], intr_exp[i]);
+            end
+          end
+        end
+      end
       // TODO the other regs
     endcase
 
@@ -142,13 +150,13 @@ class spi_device_scoreboard extends cip_base_scoreboard #(.CFG_T (spi_device_env
   virtual function void update_tx_fifo_and_rptr();
     uint filled_bytes = get_tx_sram_filled_bytes();
     // move data to fifo
-    while (tx_word_fifo.size < 2 && filled_bytes >= SRAM_WORD_SIZE) begin
-      tx_word_fifo.push_back(tx_mem.read(tx_rptr_exp[SRAM_MSB:0]));
-      `uvm_info(`gfn, $sformatf("write tx_word_fifo rptr 0x%0h, data: 0x%0h",
+    while (tx_word_q.size < 2 && filled_bytes >= SRAM_WORD_SIZE) begin
+      tx_word_q.push_back(tx_mem.read(tx_rptr_exp[SRAM_MSB:0]));
+      `uvm_info(`gfn, $sformatf("write tx_word_q rptr 0x%0h, data: 0x%0h",
                                tx_rptr_exp, tx_mem.read(tx_rptr_exp[SRAM_MSB:0])), UVM_MEDIUM)
       tx_rptr_exp = get_sram_new_ptr(.ptr(tx_rptr_exp),
                                      .increment(SRAM_WORD_SIZE),
-                                     .sram_size_bytes(`get_tx_allocated_sram_size_bytes));
+                                     .sram_size_bytes(`GET_TX_ALLOCATED_SRAM_SIZE_BYTES));
       filled_bytes -= SRAM_WORD_SIZE;
     end
   endfunction
@@ -156,25 +164,26 @@ class spi_device_scoreboard extends cip_base_scoreboard #(.CFG_T (spi_device_env
   // send out SPI data from tx_fifo and fetch more data from sram to fifo
   virtual function void sendout_spi_tx_data(bit [31:0] data_act);
 
-    if (tx_word_fifo.size > 0) begin
-      bit [31:0] data_exp     = tx_word_fifo.pop_front();
+    if (tx_word_q.size > 0) begin
+      bit [31:0] data_exp     = tx_word_q.pop_front();
       `DV_CHECK_EQ(data_act, data_exp, "Compare SPI TX data")
       update_tx_fifo_and_rptr();
     end else begin // underflow
       // TODO coverage sample
-      `uvm_info(`gfn, $sformatf("TX underflow data: 0x%0h", data_act), UVM_LOW)
+      `uvm_info(`gfn, $sformatf("TX underflow data: 0x%0h", data_act), UVM_MEDIUM)
     end
   endfunction
 
   // when receive a spi rx data, save it in rx_fifo and then write to rx_mem
   // when rx_fifo is full (size=2) and no space in sram, drop it
   virtual function void receive_spi_rx_data(bit [TL_DW:0] data);
-    if (get_rx_sram_space_bytes() >= SRAM_WORD_SIZE || rx_word_fifo.size < 2) begin
-      rx_word_fifo.push_back(data);
+    if (get_rx_sram_space_bytes() >= SRAM_WORD_SIZE || rx_word_q.size < 2) begin
+      rx_word_q.push_back(data);
       update_rx_mem_fifo_and_wptr();
     end
     else begin
-      `uvm_info(`gfn, $sformatf("RX overflow data: 0x%0h ptr: 0x%0h", data, rx_wptr_exp), UVM_LOW)
+      `uvm_info(`gfn, $sformatf("RX overflow data: 0x%0h ptr: 0x%0h", data, rx_wptr_exp),
+                UVM_MEDIUM)
     end
   endfunction
 
@@ -182,14 +191,14 @@ class spi_device_scoreboard extends cip_base_scoreboard #(.CFG_T (spi_device_env
   virtual function void update_rx_mem_fifo_and_wptr();
     uint space_bytes = get_rx_sram_space_bytes();
     // move from fifo to mem
-    while (rx_word_fifo.size > 0 && space_bytes >= SRAM_WORD_SIZE) begin
-      bit [TL_DW:0] data = rx_word_fifo.pop_front();
+    while (rx_word_q.size > 0 && space_bytes >= SRAM_WORD_SIZE) begin
+      bit [TL_DW:0] data = rx_word_q.pop_front();
       rx_mem.write(rx_wptr_exp[SRAM_MSB:0], data);
       `uvm_info(`gfn, $sformatf("write rx_mem, addr 0x%0h, data: 0x%0h",
-                               tx_rptr_exp, tx_mem.read(tx_rptr_exp[SRAM_MSB:0])), UVM_MEDIUM)
+                                rx_wptr_exp, data), UVM_MEDIUM)
       rx_wptr_exp = get_sram_new_ptr(.ptr(rx_wptr_exp),
                                      .increment(SRAM_WORD_SIZE),
-                                     .sram_size_bytes(`get_rx_allocated_sram_size_bytes));
+                                     .sram_size_bytes(`GET_RX_ALLOCATED_SRAM_SIZE_BYTES));
       space_bytes -= SRAM_WORD_SIZE;
     end
   endfunction
@@ -198,7 +207,7 @@ class spi_device_scoreboard extends cip_base_scoreboard #(.CFG_T (spi_device_env
     uint tx_wptr      = ral.txf_ptr.wptr.get_mirrored_value();
     uint filled_bytes = get_sram_filled_bytes(tx_wptr,
                                               tx_rptr_exp,
-                                              `get_tx_allocated_sram_size_bytes,
+                                              `GET_TX_ALLOCATED_SRAM_SIZE_BYTES,
                                               {`gfn, "::get_tx_sram_filled_bytes"});
     return filled_bytes;
   endfunction
@@ -207,7 +216,7 @@ class spi_device_scoreboard extends cip_base_scoreboard #(.CFG_T (spi_device_env
     uint rx_rptr     = ral.rxf_ptr.rptr.get_mirrored_value();
     uint space_bytes = get_sram_space_bytes(rx_wptr_exp,
                                             rx_rptr,
-                                            `get_rx_allocated_sram_size_bytes,
+                                            `GET_RX_ALLOCATED_SRAM_SIZE_BYTES,
                                             {`gfn, "::get_rx_sram_space_bytes"});
     return space_bytes;
   endfunction
@@ -216,10 +225,15 @@ class spi_device_scoreboard extends cip_base_scoreboard #(.CFG_T (spi_device_env
     super.reset(kind);
     tx_rptr_exp = ral.txf_ptr.rptr.get_reset();
     rx_wptr_exp = ral.rxf_ptr.wptr.get_reset();
+    intr_exp    = ral.intr_state.get_reset();
   endfunction
 
   function void check_phase(uvm_phase phase);
     super.check_phase(phase);
+    `DV_EOT_PRINT_TLM_FIFO_CONTENTS(spi_item, host_spi_data_fifo)
+    `DV_EOT_PRINT_TLM_FIFO_CONTENTS(spi_item, device_spi_data_fifo)
+    `DV_CHECK_EQ(tx_word_q.size, 0)
+    `DV_CHECK_EQ(rx_word_q.size, 0)
   endfunction
 
 endclass

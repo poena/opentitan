@@ -5,13 +5,14 @@
 #include "sw/host/spiflash/ftdi_spi_interface.h"
 
 #include <assert.h>
+#include <chrono>
+#include <cstring>
 #include <fcntl.h>
+#include <iostream>
+#include <openssl/sha.h>
+#include <string>
 #include <termios.h>
 #include <unistd.h>
-
-#include <cstring>
-#include <iostream>
-#include <string>
 #include <vector>
 
 // Include MPSSE SPI library
@@ -23,26 +24,22 @@ namespace opentitan {
 namespace spiflash {
 namespace {
 
-// Required delay to synchronize transactions with FPGA environment.
-// TODO: If transmission is not successful, adapt this by an argument.
-constexpr int kTransmitDelay = 1000000;
-
-// FTDI Configuration. This can be made configurable later on if needed.
-constexpr int kFrequency = 1000000;  // 1MHz
-
+/** FTDI MPSSE GPIO Mappings */
 enum FtdiGpioMapping {
-  // SRST_N reset.
+  /** SRST_N reset. */
   kGpioJtagSrstN = GPIOL1,
 
-  // JTAG SPI_N select signal.
+  /** JTAG SPI_N select signal. */
   kGpioJtagSpiN = GPIOL2,
 
-  // Bootstrap pin.
+  /** Bootstrap pin. */
   kBootstrapH = GPIOL3,
 };
 
-// Resets the target to go back to boot_rom. Assumes boot_rom will enter
-// bootstrap mode.
+/**
+ * Resets the target to go back to boot_rom. Assumes boot_rom will enter
+ * bootstrap mode.
+ */
 void ResetTarget(struct mpsse_context *ctx) {
   // Set bootstrap pin high
   PinHigh(ctx, kBootstrapH);
@@ -58,11 +55,12 @@ void ResetTarget(struct mpsse_context *ctx) {
   usleep(100000);
   PinLow(ctx, kGpioJtagSpiN);
 }
-
 }  // namespace
 
-// Wrapper struct used to hide mpsse_context since incomplete C struct
-// declarations don't play in forward declarations.
+/**
+ * Wrapper struct used to hide mpsse_context since incomplete C struct
+ * declarations don't play in forward declarations.
+ */
 struct MpsseHandle {
   struct mpsse_context *ctx;
 
@@ -74,7 +72,8 @@ struct MpsseHandle {
   }
 };
 
-FtdiSpiInterface::FtdiSpiInterface() : spi_(nullptr) {}
+FtdiSpiInterface::FtdiSpiInterface(Options options)
+    : options_(options), spi_(nullptr) {}
 
 FtdiSpiInterface::~FtdiSpiInterface() {
   if (spi_ != nullptr) {
@@ -84,7 +83,25 @@ FtdiSpiInterface::~FtdiSpiInterface() {
 }
 
 bool FtdiSpiInterface::Init() {
-  struct mpsse_context *ctx = MPSSE(SPI0, kFrequency, MSB);
+  if (!options_.device_serial_number.empty() &&
+      (options_.device_vendor_id == 0 || options_.device_product_id == 0)) {
+    std::cerr << "FTDI device serial number requires the vendor_id and product "
+                 "id to be set."
+              << std::endl;
+    return false;
+  }
+
+  struct mpsse_context *ctx = nullptr;
+  if (options_.device_vendor_id == 0 || options_.device_product_id == 0) {
+    ctx = MPSSE(/*mode=*/SPI0, options_.spi_frequency, /*endianess=*/MSB);
+  } else {
+    const char *serial_number = options_.device_serial_number.empty()
+                                    ? nullptr
+                                    : options_.device_serial_number.c_str();
+    ctx = Open(options_.device_vendor_id, options_.device_product_id,
+               /*mode=*/SPI0, options_.spi_frequency, /*endianess=*/MSB,
+               /*interface=*/IFACE_A, /*description=*/nullptr, serial_number);
+  }
   if (ctx == nullptr) {
     std::cerr << "Unable to open FTDI SPI interface." << std::endl;
     return false;
@@ -94,8 +111,7 @@ bool FtdiSpiInterface::Init() {
   return true;
 }
 
-bool FtdiSpiInterface::TransmitFrame(const uint8_t *tx, uint8_t *rx,
-                                     size_t size) {
+bool FtdiSpiInterface::TransmitFrame(const uint8_t *tx, size_t size) {
   assert(spi_ != nullptr);
 
   // The mpsse library is more permissive than the SpiInteface. Copying tx
@@ -106,22 +122,79 @@ bool FtdiSpiInterface::TransmitFrame(const uint8_t *tx, uint8_t *rx,
     std::cerr << "Unable to start spi transaction." << std::endl;
     return false;
   }
+
   uint8_t *tmp_rx = ::Transfer(spi_->ctx, tx_local.data(), size);
+  // We're not using the result of this read, so free it right away.
+  if (tmp_rx == nullptr) {
+    free(tmp_rx);
+  }
+
   if (Stop(spi_->ctx)) {
     std::cerr << "Unable to terminate spi transaction." << std::endl;
-    if (tmp_rx) {
-      free(tmp_rx);
-    }
     return false;
   }
-  if (tmp_rx == nullptr) {
-    std::cerr << "Unable to transfer data. Frame size: " << size << std::endl;
-    return false;
-  }
-  usleep(kTransmitDelay);
-  memcpy(rx, tmp_rx, size);
-  free(tmp_rx);
   return true;
+}
+
+bool FtdiSpiInterface::CheckHash(const uint8_t *tx, size_t size) {
+  uint8_t hash[SHA256_DIGEST_LENGTH];
+  SHA256_CTX sha256;
+  SHA256_Init(&sha256);
+  SHA256_Update(&sha256, tx, size);
+  SHA256_Final(hash, &sha256);
+
+  uint8_t *rx;
+
+  int hash_index = 0;
+  bool hash_correct = false;
+
+  if (Start(spi_->ctx)) {
+    std::cerr << "Unable to start spi transaction." << std::endl;
+    return false;
+  }
+
+  auto begin = std::chrono::steady_clock::now();
+  auto now = begin;
+  while (!hash_correct &&
+         std::chrono::duration_cast<std::chrono::microseconds>(now - begin)
+                 .count() < options_.hash_read_timeout_us) {
+    usleep(options_.hash_read_delay_us);
+    rx = nullptr;
+    rx = ::Read(spi_->ctx, size);
+    if (!rx) {
+      std::cerr << "Read failed, did not allocate buffer." << std::endl;
+      break;
+    }
+
+    // It appears that the hash is always the first 32 bytes in practice, but in
+    // testing I've seen the hash appear at random locations in the message.
+    // Checking for the hash at any location or even split between messages may
+    // not be necessary, but it is probably safer.
+    usleep(options_.hash_check_delay_us);
+    for (int i = 0; !hash_correct && i < SHA256_DIGEST_LENGTH; ++i) {
+      if (rx[i] == hash[hash_index]) {
+        ++hash_index;
+        if (hash_index == SHA256_DIGEST_LENGTH) {
+          hash_correct = true;
+        }
+      } else {
+        hash_index = 0;
+      }
+    }
+    free(rx);
+    now = std::chrono::steady_clock::now();
+  }
+
+  if (Stop(spi_->ctx)) {
+    std::cerr << "Unable to terminate spi transaction." << std::endl;
+    return false;
+  }
+
+  if (!hash_correct) {
+    std::cerr << "Didn't receive correct hash before timeout." << std::endl;
+  }
+
+  return hash_correct;
 }
 }  // namespace spiflash
 }  // namespace opentitan

@@ -10,9 +10,9 @@ title: "HMAC DV Plan"
   * Verify TileLink device protocol compliance with an SVA based testbench
 
 ## Current status
-* [Design & verification stage]({{< relref "doc/project/hw_dashboard" >}})
-  * [HW development stages]({{< relref "doc/project/hw_stages.md" >}})
-* DV regression results dashboard (link TBD)
+* [Design & verification stage]({{< relref "hw" >}})
+  * [HW development stages]({{< relref "doc/project/development_stages.md" >}})
+* [Simulation results](https://reports.opentitan.org/hw/ip/hmac/dv/latest/results.html)
 
 ## Design features
 For detailed information on HMAC design features, please see the
@@ -54,10 +54,9 @@ which provides the ability to drive and independently monitor random traffic via
 TL host interface into HMAC device.
 
 ### UVM RAL Model
-The HMAC RAL model is created with the `hw/dv/tools/gen_ral_pkg.py` wrapper script at the start of the simulation automatically and is placed in the build area, along with a corresponding `fusesoc` core file.
-The wrapper script invokes the [regtool.py]({{< relref "util/reggen/README.md" >}}) script from within to generate the RAL model.
+The HMAC RAL model is created with the [`ralgen`]({{< relref "hw/dv/tools/ralgen/README.md" >}}) FuseSoC generator script automatically when the simulation is at the build stage.
 
-It can be created manually by running `make ral` command from the `dv` area.
+It can be created manually by invoking [`regtool`]({{< relref "util/reggen/README.md" >}}):
 
 ### Reference models
 To check the correctness of the output for SHA256 and HMAC, the testbench uses
@@ -140,8 +139,7 @@ Please take a look at the link for detailed information on the usage, capabiliti
 issues.
 Here's how to run a basic sanity test:
 ```console
-  $ cd hw/ip/hmac/dv
-  $ make TEST_NAME=hmac_sanity
+$ $REPO_TOP/util/dvsim/dvsim.py $REPO_TOP/hw/ip/hmac/dv/hmac_sim_cfg.hjson -i hmac_sanity
 ```
 
 ## Testplan

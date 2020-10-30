@@ -9,11 +9,10 @@
    different platforms
 */
 
-#ifndef CORE_PORTME_H
-#define CORE_PORTME_H
+#ifndef OPENTITAN_SW_DEVICE_BENCHMARKS_COREMARK_TOP_EARLGREY_CORE_PORTME_H_
+#define OPENTITAN_SW_DEVICE_BENCHMARKS_COREMARK_TOP_EARLGREY_CORE_PORTME_H_
 
-#include "sw/device/lib/common.h"
-#include "sw/device/lib/uart.h"
+#include <stddef.h>
 
 extern unsigned int _stack_start;
 
@@ -180,9 +179,7 @@ typedef ee_u32 CORE_TICKS;
 */
 extern ee_u32 default_num_contexts;
 
-typedef struct CORE_PORTABLE_S {
-  ee_u8 portable_id;
-} core_portable;
+typedef struct CORE_PORTABLE_S { ee_u8 portable_id; } core_portable;
 
 /* target specific init/fini */
 void portable_init(core_portable *p, int *argc, char *argv[]);
@@ -201,4 +198,4 @@ void portable_fini(core_portable *p);
 
 int ee_printf(const char *fmt, ...);
 
-#endif /* CORE_PORTME_H */
+#endif  // OPENTITAN_SW_DEVICE_BENCHMARKS_COREMARK_TOP_EARLGREY_CORE_PORTME_H_

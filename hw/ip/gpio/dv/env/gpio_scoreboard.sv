@@ -32,6 +32,10 @@ class gpio_scoreboard extends cip_base_scoreboard #(.CFG_T (gpio_env_cfg),
   // (ii) store information of which all interupt bits were cleared
   bit [TL_DW-1:0] cleared_intr_bits;
 
+  // mask are WO, store the values in scb
+  uvm_reg_data_t masked_out_lower_mask;
+  uvm_reg_data_t masked_out_upper_mask;
+
   `uvm_component_utils(gpio_scoreboard)
 
   `uvm_component_new
@@ -58,9 +62,6 @@ class gpio_scoreboard extends cip_base_scoreboard #(.CFG_T (gpio_env_cfg),
     bit write               = item.is_write();
     uvm_reg_addr_t csr_addr = get_normalized_addr(item.a_addr);
 
-    super.process_tl_access(item, channel);
-    if (is_tl_err_exp || is_tl_unmapped_addr) return;
-
     // if access was to a valid csr, get the csr handle
     if (csr_addr inside {cfg.csr_addrs}) begin
       csr = ral.default_map.get_reg_by_offset(csr_addr);
@@ -72,13 +73,13 @@ class gpio_scoreboard extends cip_base_scoreboard #(.CFG_T (gpio_env_cfg),
     // grab completed transactions from data channel; ignore packets from address channel
     if (channel == AddrChannel) begin
       // Clock period in nano seconds (timeunit)
-      int clk_period = cfg.clk_rst_vif.clk_period_ps / 1000;
+      real clk_period = cfg.clk_rst_vif.clk_period_ps / 1000;
       time crnt_time = $time;
 
       // apply pending update for interrupt state
       if (data_in_update_queue.size() > 0) begin
         if (data_in_update_queue[$].needs_update == 1'b1 &&
-            ((crnt_time - data_in_update_queue[$].eval_time) / clk_period) > 1) begin
+            (int'((crnt_time - data_in_update_queue[$].eval_time) / clk_period)) > 1) begin
           void'(ral.data_in.predict(.value(data_in_update_queue[$].reg_value),
                                     .kind(UVM_PREDICT_READ)));
         end else if(data_in_update_queue[$ - 1].needs_update == 1'b1) begin
@@ -94,7 +95,7 @@ class gpio_scoreboard extends cip_base_scoreboard #(.CFG_T (gpio_env_cfg),
         // read on same or next clock will not give latest updated value. So, look for time stamp
         // of latest update to decide which value to predict for "intr_state" mirrored value
         if (intr_state_update_queue[$].needs_update == 1'b1 &&
-            ((crnt_time - intr_state_update_queue[$].eval_time) / clk_period) > 1) begin
+            (int'((crnt_time - intr_state_update_queue[$].eval_time) / clk_period)) > 1) begin
           void'(ral.intr_state.predict(.value(intr_state_update_queue[$].reg_value),
                                        .kind(UVM_PREDICT_READ)));
         end else if(intr_state_update_queue[$ - 1].needs_update == 1'b1) begin
@@ -178,12 +179,18 @@ class gpio_scoreboard extends cip_base_scoreboard #(.CFG_T (gpio_env_cfg),
               // Coverage Sampling: Cross coverage on mask and data within masked_* registers
               if (!uvm_re_match("masked*", csr.get_name())) begin
                 bit [(NUM_GPIOS/2) - 1:0] mask, data;
-                {mask, data} = item.d_data;
+                {mask, data} = item.a_data;
                 for (uint each_pin = 0; each_pin < NUM_GPIOS/2; each_pin++) begin
                   cov.out_oe_mask_data_cov_objs[each_pin][csr.get_name()].var1_var2_cg.sample(
                       mask[each_pin], data[each_pin]);
                 end
               end
+            end
+            // these fields are WO, save values in scb
+            if (csr.get_name() == "masked_out_lower") begin
+              masked_out_lower_mask = get_field_val(ral.masked_out_lower.mask, item.a_data);
+            end else if (csr.get_name() == "masked_out_upper") begin
+              masked_out_upper_mask = get_field_val(ral.masked_out_upper.mask, item.a_data);
             end
             void'(csr.predict(.value(item.a_data), .kind(UVM_PREDICT_WRITE), .be(item.a_mask)));
           end
@@ -205,7 +212,16 @@ class gpio_scoreboard extends cip_base_scoreboard #(.CFG_T (gpio_env_cfg),
                                          csr.get_mirrored_value();
             bit [TL_DW-1:0] pred_val_intr_pins = intr_state &
                                                  ral.intr_enable.get_mirrored_value();
-            `DV_CHECK_EQ(cfg.intr_vif.pins, pred_val_intr_pins)
+            // according to issue #841, interrupt is a flop and the value will be updated after one
+            // clock cycle. Because the `pred_val_intr_pins` might be updated during the one clk
+            // cycle, we store the predicted intr val into a temp automatic variable.
+            fork
+              begin
+                automatic bit [TL_DW-1:0] pred_val_intr_pins_temp = pred_val_intr_pins;
+                cfg.clk_rst_vif.wait_clks(1);
+                if (!cfg.under_reset) `DV_CHECK_EQ(cfg.intr_vif.pins, pred_val_intr_pins_temp)
+              end
+            join_none
           end
         end
       end // if (write == 0)
@@ -218,10 +234,10 @@ class gpio_scoreboard extends cip_base_scoreboard #(.CFG_T (gpio_env_cfg),
     logic [NUM_GPIOS-1:0] prev_gpio_i = cfg.gpio_vif.pins;
 
     forever begin : monitor_pins_if
-      @(cfg.gpio_vif.pins or under_reset);
+      @(cfg.gpio_vif.pins or cfg.under_reset);
       `uvm_info(`gfn, $sformatf("cfg.gpio_vif.pins = %0h, under_reset = %0b",
-                                cfg.gpio_vif.pins, under_reset), UVM_HIGH)
-      if (under_reset == 1'b0) begin
+                                cfg.gpio_vif.pins, cfg.under_reset), UVM_HIGH)
+      if (cfg.under_reset == 1'b0) begin
         // Coverage Sampling: gpio pin values' coverage
         if (cfg.en_cov) begin
           foreach (cov.gpio_pin_values_cov_obj[each_pin]) begin
@@ -320,8 +336,8 @@ class gpio_scoreboard extends cip_base_scoreboard #(.CFG_T (gpio_env_cfg),
   // Task: monitor_gpio_interrupt_pins
   virtual task monitor_gpio_interrupt_pins();
     forever begin : monitor_gpio_intr
-      @(cfg.intr_vif.pins or under_reset) begin
-        if (under_reset == 0) begin
+      @(cfg.intr_vif.pins or cfg.under_reset) begin
+        if (cfg.under_reset == 0) begin
           if (cfg.en_cov) begin
             // Coverage Sampling: gpio interrupt pin values and transitions
             for (uint each_pin = 0; each_pin < NUM_GPIOS; each_pin++) begin
@@ -361,12 +377,11 @@ class gpio_scoreboard extends cip_base_scoreboard #(.CFG_T (gpio_env_cfg),
           update_gpio_out_regs();
         end
         "masked_out_lower": begin
-          uvm_reg_data_t mask = ral.masked_out_lower.mask.get_mirrored_value();
           uvm_reg_data_t data = ral.masked_out_lower.data.get_mirrored_value();
 
           for (uint pin_idx = 0;
                pin_idx < ral.masked_out_lower.mask.get_n_bits(); pin_idx++) begin
-            if (mask[pin_idx] == 1'b1) begin
+            if (masked_out_lower_mask[pin_idx] == 1'b1) begin
               data_out[pin_idx] = data[pin_idx];
             end
           end
@@ -376,11 +391,10 @@ class gpio_scoreboard extends cip_base_scoreboard #(.CFG_T (gpio_env_cfg),
           update_gpio_out_regs();
         end
         "masked_out_upper": begin
-          uvm_reg_data_t mask = ral.masked_out_upper.mask.get_mirrored_value();
           uvm_reg_data_t data = ral.masked_out_upper.data.get_mirrored_value();
 
           for (uint pin_idx = 0; pin_idx < ral.masked_out_upper.mask.get_n_bits(); pin_idx++) begin
-            if (mask[pin_idx] == 1'b1) begin
+            if (masked_out_upper_mask[pin_idx] == 1'b1) begin
               data_out[(NUM_GPIOS / 2) + pin_idx] = data[pin_idx];
             end
           end
@@ -705,7 +719,6 @@ class gpio_scoreboard extends cip_base_scoreboard #(.CFG_T (gpio_env_cfg),
   //        before calling the method.
   function void update_gpio_out_regs();
     uvm_reg_data_t data;
-    const uvm_reg_data_t mask = 0;
     // 1. Update "direct_out" register for writes to masked_out_* registers
     //    For write to "direct_out", it must have been updated already.
     void'(ral.direct_out.predict(.value(data_out), .kind(UVM_PREDICT_WRITE)));
@@ -716,7 +729,6 @@ class gpio_scoreboard extends cip_base_scoreboard #(.CFG_T (gpio_env_cfg),
          idx++) begin
       data[idx] = 1'b0;
     end
-    void'(ral.masked_out_lower.mask.predict(.value(mask), .kind(UVM_PREDICT_WRITE)));
     void'(ral.masked_out_lower.data.predict(.value(data), .kind(UVM_PREDICT_WRITE)));
     // 3. Update masked_out_upper
     data = 0;
@@ -725,7 +737,6 @@ class gpio_scoreboard extends cip_base_scoreboard #(.CFG_T (gpio_env_cfg),
          idx++) begin
       data[idx - ral.masked_out_upper.data.get_n_bits()] = data_out[idx];
     end
-    void'(ral.masked_out_upper.mask.predict(.value(mask), .kind(UVM_PREDICT_WRITE)));
     void'(ral.masked_out_upper.data.predict(.value(data), .kind(UVM_PREDICT_WRITE)));
     // Coverage Sampling: Coverage on DATA_OUT values and its combinations with DATA_OE
     sample_data_out_data_oe_coverage();

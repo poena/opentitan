@@ -42,7 +42,7 @@ package test_vectors_pkg;
         `uvm_fatal(header, "Cannot find $plusarg for the test_vectors_dir.")
       end
     end
-    path = {test_vectors_dir, file_name};
+    path = {test_vectors_dir, "/", file_name};
   endfunction : get_test_vectors_path
 
   function automatic void open_file(input string path, output int fd);
@@ -56,7 +56,8 @@ package test_vectors_pkg;
 
   // parse sha/hmac msg, key (if hmac_en), msg length, and exp_digest from a test vectors file
   // support test vectors files with a nist vector format
-  function automatic void parse_sha_hmac(bit hmac_en, input int index, ref test_vectors_t parsed_vectors[]);
+  function automatic void parse_sha_hmac(bit hmac_en, int index,
+                                         ref test_vectors_t parsed_vectors[]);
     int        fd;
     bit [7:0]  bytes[];
     string     name, str_data, test_vectors_path;

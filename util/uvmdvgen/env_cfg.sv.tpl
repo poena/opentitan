@@ -4,8 +4,10 @@
 
 % if is_cip:
 class ${name}_env_cfg extends cip_base_env_cfg #(.RAL_T(${name}_reg_block));
-% else:
+% elif has_ral:
 class ${name}_env_cfg extends dv_base_env_cfg #(.RAL_T(${name}_reg_block));
+% else:
+class ${name}_env_cfg extends dv_base_env_cfg;
 % endif
 
   // ext component cfgs
@@ -21,12 +23,13 @@ class ${name}_env_cfg extends dv_base_env_cfg #(.RAL_T(${name}_reg_block));
 
   `uvm_object_new
 
-  virtual function void initialize_csr_addr_map_size();
-    this.csr_addr_map_size = ${name.upper()}_ADDR_MAP_SIZE;
-  endfunction : initialize_csr_addr_map_size
-
-  virtual function void initialize(bit [TL_AW-1:0] csr_base_addr = '1);
+  virtual function void initialize(bit [31:0] csr_base_addr = '1);
+% if has_alerts:
+    list_of_alerts = ${name}_env_pkg::LIST_OF_ALERTS;
+% endif
+% if has_ral:
     super.initialize(csr_base_addr);
+% endif
 % for agent in env_agents:
     // create ${agent} agent config obj
     m_${agent}_agent_cfg = ${agent}_agent_cfg::type_id::create("m_${agent}_agent_cfg");
@@ -39,7 +42,6 @@ class ${name}_env_cfg extends dv_base_env_cfg #(.RAL_T(${name}_reg_block));
       if (rg != null) begin
         num_interrupts = ral.intr_state.get_n_used_bits();
       end
-      num_alerts = 0;
     end
 % endif
   endfunction

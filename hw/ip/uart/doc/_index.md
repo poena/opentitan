@@ -19,7 +19,7 @@ top level system.
 - 32 x 8b RX buffer
 - 32 x 8b TX buffer
 - Programmable baud rate
-- Interrupt for overflow, frame error, parity error, break error, receive
+- Interrupt for transmit empty, receive overflow, frame error, parity error, break error, receive
   timeout
 
 ## Description
@@ -87,7 +87,7 @@ completes one byte of data transfer.
 
 ### Transmission
 
-A write to {{< regref "WDATA" >}} enqueues a data byte into the 32 depth write FIFO, which
+A write to {{< regref "WDATA" >}} enqueues a data byte into the 32 byte deep write FIFO, which
 triggers the transmit module to start UART TX serial data transfer. The TX
 module dequeues the byte from the FIFO and shifts it bit by bit out to the UART
 TX pin on positive edges of the baud clock.
@@ -95,8 +95,9 @@ TX pin on positive edges of the baud clock.
 If TX is not enabled, written DATA into FIFO will be stacked up and sent out
 when TX is enabled.
 
-If the FIFO is full when data is written to {{< regref "WDATA" >}} that data will be discarded
-and a TX FIFO overflow interrupt raised.
+When the FIFO becomes empty as part of transmittion, a TX FIFO empty interrupt will be raised.
+This is separate from the TX FIFO water mark interrupt.
+
 
 ### Reception
 
@@ -157,7 +158,13 @@ The baud rate is set by writing to the {{< regref "CTRL.NCO" >}} register field.
 set using the equation below, where `f_pclk` is the system clock frequency
 provided to the UART. and `f_baud` is the desired baud rate (in bits per second).
 
-$$ NCO = {{2^{20} * f\_{baud}} \over {f\_{pclk}}} $$
+$$ NCO = 16 \times {{2^{$bits(NCO)} \times f\_{baud}} \over {f\_{pclk}}} $$
+
+The formula above depends on the NCO CSR width.
+The logic creates a x16 tick when the NCO counter overflows.
+So, the computed baud rate from NCO value is below.
+
+$$ f\_{baud} = {{1 \over 16} \times {NCO \over {2^{$bits(NCO)}}} \times {f\_{pclk}}} $$
 
 Note that the NCO result from the above formula can be a fraction but
 the NCO register only accepts an integer value. This will create an
@@ -185,8 +192,8 @@ an integer so that the error in the target range then the baud rate
 can be supported, however if it is too far off an integer then the
 baud rate cannot be supported. This check is needed when
 
-$$ {{baud} < {{40 * f\_{pclk}} \over {2^{20}}}} \qquad OR \qquad
-{{f\_{pclk}} > {{{2^{20}} * {baud}} \over {40}}} $$
+$$ {{baud} < {{40 * f\_{pclk}} \over {2^{$bits(NCO)+4}}}} \qquad OR \qquad
+{{f\_{pclk}} > {{{2^{$bits(NCO)+4}} * {baud}} \over {40}}} $$
 
 Using rounded frequencies and common baud rates, this implies that
 care is needed for 9600 baud and below if the system clock is under
@@ -201,15 +208,26 @@ UART module has a few interrupts including general data flow interrupts
 and unexpected event interrupts.
 
 #### tx_watermark / rx_watermark
-If the TX or RX FIFO level becomes greater than or equal to their respective
-high-water mark levels (configurable via {{< regref "FIFO_CTRL.RXILVL" >}} and
-{{< regref "FIFO_CTRL.TXILVL" >}}), interrupts `tx_watermark` or `rx_watermark` are raised to
-inform SW.
+If the TX FIFO level becomes smaller than the TX water mark level (configurable via {{< regref "FIFO_CTRL.RXILVL" >}} and {{< regref "FIFO_CTRL.TXILVL" >}}), the `tx_watermark` interrupt is raised to inform SW.
+If the RX FIFO level becomes greater than or equal to RX water mark level (configurable via {{< regref "FIFO_CTRL.RXILVL" >}} and {{< regref "FIFO_CTRL.TXILVL" >}}), the `rx_watermark` interrupt is raised to inform SW.
 
-#### tx_overflow / rx_overflow
-If either FIFO receives an additional write request when its FIFO is full,
-the interrupt `tx_overflow` or `rx_overflow` is asserted and the character
-is dropped.
+Note that the watermark interrupts are edge triggered events.
+This means the interrupt only triggers when the condition transitions from untrue->true.
+This is especially important in the tx_watermark case.
+When the TX FIFO is empty, it by default satisifies all the watermark conditions.
+In order for the interrupt to trigger then, it is required that software initiates a write burst that is greater than the programmed watermark value.
+
+For example, assume TX watermark is programmed to be less than 4 bytes, and software programs one byte at a time, waits for it to finish transmitting, before supplying the next byte.
+Under these conditions, the TX watermark interrupt will never trigger because the size of the FIFO never exceeds the watermark level.
+
+
+#### tx_empty
+If TX FIFO becomes empty as part of transmit, the interrupt `tx_empty` is asserted.
+The transmitted contents may be garbage at this point as old FIFO contents will likely be transmitted.
+
+#### rx_overflow
+If RX FIFO receives an additional write request when its FIFO is full,
+the interrupt `rx_overflow` is asserted and the character is dropped.
 
 #### rx_break_err
 The `rx_break_err` interrupt is triggered if a break condition has
@@ -332,7 +350,7 @@ be unexpected overflow).
 #define CLK_FIXED_FREQ_HZ (50ULL * 1000 * 1000)
 
 void uart_init(unsigned int baud) {
-  // nco = 2^20 * baud / fclk
+  // nco = 2^20 * baud / fclk. Assume NCO width is 16bit.
   uint64_t uart_ctrl_nco = ((uint64_t)baud << 20) / CLK_FIXED_FREQ_HZ;
   REG32(UART_CTRL(0)) =
       ((uart_ctrl_nco & UART_CTRL_NCO_MASK) << UART_CTRL_NCO_OFFSET) |
@@ -386,9 +404,9 @@ int uart_rx_empty() {
           (0 << UART_FIFO_STATUS_RXLVL_LSB)) ? 1 : 0;
 }
 
-char uart_rcv_char() {
+int uart_rcv_char() {
   if(uart_rx_empty())
-    return 0xff;
+    return -1;
   return *UART_RDATA_REG;
 }
 ```
@@ -460,6 +478,10 @@ character arrives just before the timeout for the first (resetting the
 timer), the third just before the timeout from the second etc. In this
 case the host will eventually get a watermark interrupt, this will happen
 `((RXILVL - 1)*timeout)` after the first character was received.
+
+## Device Interface Functions (DIFs)
+
+{{< dif_listing "sw/device/lib/dif/dif_uart.h" >}}
 
 ## Register Table
 

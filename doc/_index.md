@@ -1,4 +1,5 @@
-# lowRISC Documentation Overview
+---
+title: "General Documentation"
+---
 
-* [User Guides](ug)
-* [Reference Manuals](rm)
+{{% sectionContent %}}

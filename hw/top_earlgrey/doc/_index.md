@@ -19,10 +19,10 @@ This is not a specification of the final implementation.
 - Memory contents
   - 512kB emulated eFlash for code and data storage
   - 64kB SRAM for data storage
-  - 8kB ROM for secure boot code storage
+  - 16kB ROM for secure boot code storage
 - Security peripherals
   - Flash controller
-  - AES-ECB module
+  - AES module with support for ECB, CBC, CFB, OFB and CTR modes of operation
   - SHA-256/HMAC module
   - Basic alert responder
   - (coming soon) emulated TRNG entropy source
@@ -104,9 +104,9 @@ These are the internal signals between that module and the pads of the platform 
 | `jtag_trst_ni` | input | JTAG Test Reset |
 | `dio_spi_device_sck_i` | input | SPI device clock |
 | `dio_spi_device_csb_i` | input | SPI device chip select |
-| `dio_spi_device_mosi_i` | input | SPI device input data |
-| `dio_spi_device_miso_o` | output | SPI device output data |
-| `dio_spi_device_miso_en_o` | output | SPI device output enable |
+| `dio_spi_device_sdi_i` | input | SPI device input data |
+| `dio_spi_device_sdo_o` | output | SPI device output data |
+| `dio_spi_device_sdo_en_o` | output | SPI device output enable |
 | `dio_uart_rx_i` | input | UART input receive data |
 | `dio_uart_tx_o` | output | UART output transmit data |
 | `dio_uart_tx_en_o` | output | UART output transmit output enable |
@@ -121,8 +121,8 @@ Below are the hardware interfaces of the FPGA target `top_earlgrey_nexsysvideo` 
 | `IO_CLK`    | input  | Chip level functional clock |
 | `IO_RST_N`  | input  | Chip level reset, active low |
 | `IO_DPS0`   | input  | Muxed functionality: JTAG `TCK` and `spi_device_sck_i` |
-| `IO_DPS1`   | input  | Muxed functionality: JTAG `TDI` and `spi_device_mosi_i` |
-| `IO_DPS2`   | output | Muxed functionality: JTAG `TDO` and `spi_device_miso_o` |
+| `IO_DPS1`   | input  | Muxed functionality: JTAG `TDI` and `spi_device_sdi_i` |
+| `IO_DPS2`   | output | Muxed functionality: JTAG `TDO` and `spi_device_sdo_o` |
 | `IO_DPS3`   | input  | Muxed functionality: JTAG `TMS` and `spi_device_csb_i` |
 | `IO_DPS4`   | input  | JTAG `TRST_N` |
 | `IO_DPS5`   | input  | JTAG `SRST_N` |
@@ -196,7 +196,7 @@ CoreMark was compiled with GCC 9.2.0 with flags: `-march=rv32imc -mabi=ilp32 -mc
 
 The device contains three memory address spaces for instruction and data.
 
-Instruction ROM (8kB) is the target for the Ibex processor after release of external reset.
+Instruction ROM (16kB) is the target for the Ibex processor after release of external reset.
 The ROM contains hard-coded instructions whose purpose is to do a minimal subset of platform checking before checking the next stage of code.
 The next stage - a boot loader stored in embedded flash memory - is the first piece of code that is not hard-coded into the silicon of the device, and thus must be signature checked.
 The ROM executes this signature check by implementing a RSA-check algorithm on the full contents of the boot loader.
@@ -301,12 +301,8 @@ is the primary
 [symmetric encryption](https://en.wikipedia.org/wiki/Symmetric-key_algorithm)
 and decryption mechanism used in OpenTitan protocols.
 AES runs with key sizes of 128b, 192b, or 256b.
-The module can select encryption or decryption of data that arrives in 16 byte quantities to be encrypted or decrypted independently of other data
-("[ECB mode](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#ECB)").
-Other modes (say
-[CTR mode](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#CTR),
-[CBC mode](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#CBC),
-etc) can be implemented in software on top of the results of ECB, though future versions of this AES IP will likely add such overlayed modes in hardware to improve performance and increase security (risk of secret exposure).
+The module can select encryption or decryption of data that arrives in 16 byte quantities to be encrypted or decrypted using different block cipher modes of operation.
+It supports [ECB mode](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#ECB), [CBC mode](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#CBC), [CFB mode](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#CFB), [OFB mode](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#OFB) and [CTR mode](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#CTR).
 For this version, all data transfer is processor-available, i.e. key and data material is passed into the module via register writes.
 Future versions might have provisions for private transfer of key and data material to reduce exposure from potentially untrusted processor activity.
 This version does not attempt to add any side-channel or fault-injection resistance into the design.
@@ -437,7 +433,7 @@ For the purpose of `top_earlgrey`, the first option has been chosen to benefit s
 
 | Item | base address | bound address |
 | --- | --- | --- |
-| `ROM`        | `0x00008000` | `0x00009fff` |
+| `ROM`        | `0x00008000` | `0x0000bfff` |
 | `SRAM`       | `0x10000000` | `0x1000ffff` |
 | `Flash`      | `0x20000000` | `0x2007ffff` |
 | `uart`       | `0x40000000` | `0x4000ffff` |

@@ -2,12 +2,10 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 
-// Get NULL from here
-#include "usb_controlep.h"
+#include "sw/device/lib/usb_controlep.h"
 
-#include "sw/device/lib/common.h"
-#include "usb_consts.h"
-#include "usbdev.h"
+#include "sw/device/lib/usb_consts.h"
+#include "sw/device/lib/usbdev.h"
 
 // Device descriptor
 static uint8_t dev_dscr[] = {
@@ -60,7 +58,7 @@ static ctstate_t setup_req(usb_controlep_ctx_t *ctctx, void *ctx,
         usbdev_sendbuf_byid(ctx, buf, len, ctctx->ep);
         return kCtWaitIn;
       }
-      return kCtIdle;  // unknown
+      return kCtError;  // unknown
 
     case kUsbSetupReqSetAddress:
       ctctx->new_dev = wValue & 0x7f;
@@ -151,6 +149,9 @@ static ctstate_t setup_req(usb_controlep_ctx_t *ctctx, void *ctx,
       usbdev_buf_copyto_byid(ctx, buf, &zero, len);
       usbdev_sendbuf_byid(ctx, buf, len, ctctx->ep);
       return kCtWaitIn;
+
+    default:
+      return kCtError;
   }
   return kCtError;
 }
@@ -220,6 +221,7 @@ static void ctrl_rx(void *ctctx_v, usbbufid_t buf, int size, int setup) {
       // Error
       break;
   }
+  usbdev_set_ep0_stall(ctx, 1);  // send a STALL, will be cleared by the HW
   TRC_S("USB: unCT ");
   TRC_I((ctctx->ctrlstate << 24) | setup << 16 | size, 32);
   TRC_C(':');
@@ -231,10 +233,17 @@ static void ctrl_rx(void *ctctx_v, usbbufid_t buf, int size, int setup) {
   ctctx->ctrlstate = kCtIdle;
 }
 
+// Callback for the USB link reset
+void ctrl_reset(void *ctctx_v) {
+  usb_controlep_ctx_t *ctctx = (usb_controlep_ctx_t *)ctctx_v;
+  ctctx->ctrlstate = kCtIdle;
+}
+
 void usb_controlep_init(usb_controlep_ctx_t *ctctx, usbdev_ctx_t *ctx, int ep,
                         const uint8_t *cfg_dscr, size_t cfg_dscr_len) {
   ctctx->ctx = ctx;
-  usbdev_endpoint_setup(ctx, ep, 1, ctctx, ctrl_tx_done, ctrl_rx, NULL);
+  usbdev_endpoint_setup(ctx, ep, 1, ctctx, ctrl_tx_done, ctrl_rx, NULL,
+                        ctrl_reset);
   ctctx->ctrlstate = kCtIdle;
   ctctx->cfg_dscr = cfg_dscr;
   ctctx->cfg_dscr_len = cfg_dscr_len;

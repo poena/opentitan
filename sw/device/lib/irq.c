@@ -4,11 +4,15 @@
 
 #include "sw/device/lib/irq.h"
 
-#include "sw/device/lib/common.h"
+#include "sw/device/lib/base/stdasm.h"
 
 static const uint32_t IRQ_EXT_ENABLE_OFFSET = 11;
 static const uint32_t IRQ_TIMER_ENABLE_OFFSET = 7;
 static const uint32_t IRQ_SW_ENABLE_OFFSET = 3;
+
+void irq_set_vector_offset(uintptr_t address) {
+  asm volatile("csrw mtvec, %0" ::"r"(address));
+}
 
 static void irq_mie_set(uint32_t value) {
   asm volatile("csrrs zero, mie, %0" : : "r"(value) :);

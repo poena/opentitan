@@ -6,9 +6,11 @@
 // to an TL-UL bus.  This instantiates two FIFOs, one for the request side,
 // and one for the response side.
 
+`include "prim_assert.sv"
+
 module tlul_fifo_async #(
-  parameter ReqDepth = 3,
-  parameter RspDepth = 3
+  parameter int unsigned ReqDepth = 3,
+  parameter int unsigned RspDepth = 3
 ) (
   input                      clk_h_i,
   input                      rst_h_ni,
@@ -21,16 +23,16 @@ module tlul_fifo_async #(
 );
 
   // Put everything on the request side into one FIFO
-  localparam REQFIFO_WIDTH = $bits(tlul_pkg::tl_h2d_t)-2;
+  localparam int unsigned REQFIFO_WIDTH = $bits(tlul_pkg::tl_h2d_t)-2;
 
   prim_fifo_async #(.Width(REQFIFO_WIDTH), .Depth(ReqDepth)) reqfifo (
     .clk_wr_i      (clk_h_i),
     .rst_wr_ni     (rst_h_ni),
     .clk_rd_i      (clk_d_i),
     .rst_rd_ni     (rst_d_ni),
-    .wvalid        (tl_h_i.a_valid),
-    .wready        (tl_h_o.a_ready),
-    .wdata         ({tl_h_i.a_opcode ,
+    .wvalid_i      (tl_h_i.a_valid),
+    .wready_o      (tl_h_o.a_ready),
+    .wdata_i       ({tl_h_i.a_opcode ,
                      tl_h_i.a_param  ,
                      tl_h_i.a_size   ,
                      tl_h_i.a_source ,
@@ -38,9 +40,9 @@ module tlul_fifo_async #(
                      tl_h_i.a_mask   ,
                      tl_h_i.a_data   ,
                      tl_h_i.a_user   }),
-    .rvalid        (tl_d_o.a_valid),
-    .rready        (tl_d_i.a_ready),
-    .rdata         ({tl_d_o.a_opcode ,
+    .rvalid_o      (tl_d_o.a_valid),
+    .rready_i      (tl_d_i.a_ready),
+    .rdata_o       ({tl_d_o.a_opcode ,
                      tl_d_o.a_param  ,
                      tl_d_o.a_size   ,
                      tl_d_o.a_source ,
@@ -48,22 +50,22 @@ module tlul_fifo_async #(
                      tl_d_o.a_mask   ,
                      tl_d_o.a_data   ,
                      tl_d_o.a_user   }),
-    .wdepth        (),
-    .rdepth        ()
+    .wdepth_o      (),
+    .rdepth_o      ()
   );
 
   // Put everything on the response side into the other FIFO
 
-  localparam RSPFIFO_WIDTH = $bits(tlul_pkg::tl_d2h_t) -2;
+  localparam int unsigned RSPFIFO_WIDTH = $bits(tlul_pkg::tl_d2h_t) -2;
 
   prim_fifo_async #(.Width(RSPFIFO_WIDTH), .Depth(RspDepth)) rspfifo (
     .clk_wr_i      (clk_d_i),
     .rst_wr_ni     (rst_d_ni),
     .clk_rd_i      (clk_h_i),
     .rst_rd_ni     (rst_h_ni),
-    .wvalid        (tl_d_i.d_valid),
-    .wready        (tl_d_o.d_ready),
-    .wdata         ({tl_d_i.d_opcode,
+    .wvalid_i      (tl_d_i.d_valid),
+    .wready_o      (tl_d_o.d_ready),
+    .wdata_i       ({tl_d_i.d_opcode,
                      tl_d_i.d_param ,
                      tl_d_i.d_size  ,
                      tl_d_i.d_source,
@@ -71,9 +73,9 @@ module tlul_fifo_async #(
                      tl_d_i.d_data  ,
                      tl_d_i.d_user  ,
                      tl_d_i.d_error }),
-    .rvalid        (tl_h_o.d_valid),
-    .rready        (tl_h_i.d_ready),
-    .rdata         ({tl_h_o.d_opcode,
+    .rvalid_o      (tl_h_o.d_valid),
+    .rready_i      (tl_h_i.d_ready),
+    .rdata_o       ({tl_h_o.d_opcode,
                      tl_h_o.d_param ,
                      tl_h_o.d_size  ,
                      tl_h_o.d_source,
@@ -81,8 +83,8 @@ module tlul_fifo_async #(
                      tl_h_o.d_data  ,
                      tl_h_o.d_user  ,
                      tl_h_o.d_error }),
-    .wdepth        (),
-    .rdepth        ()
+    .wdepth_o      (),
+    .rdepth_o      ()
   );
 
   ////////////////

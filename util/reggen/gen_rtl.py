@@ -5,15 +5,13 @@
 """
 
 import logging as log
-import operator
-import sys
 
 from mako.template import Template
 from mako import exceptions
 from pkg_resources import resource_filename
 
-from .data import *
-from .field_enums import HwAccess, SwAccess, SwRdAccess, SwWrAccess
+from .data import Field, Reg, MultiReg, Window, Block
+from .field_enums import HwAccess, SwRdAccess, SwWrAccess
 
 
 def escape_name(name):
@@ -40,7 +38,6 @@ def parse_field(obj, reg, nfields):
     f.lsb = obj["bitinfo"][2]
     f.msb = f.lsb + obj["bitinfo"][1] - 1
 
-    #assert not 'swaccess' in obj, "R[%s] F[%s]: SwAccess in Field not supported" % (reg.name, f.name)
     f.swaccess = obj["genswaccess"]
     f.swrdaccess = obj["genswrdaccess"]
     f.swwraccess = obj["genswwraccess"]
@@ -48,6 +45,8 @@ def parse_field(obj, reg, nfields):
     f.hwqe = obj["genhwqe"]
     f.hwre = obj["genhwre"]
     f.hwext = reg.hwext
+    f.tags = obj["tags"]
+    f.shadowed = reg.shadowed
 
     # resval handling. `genresval` has zero value if `resval` field is defined
     # as unknown 'x'
@@ -90,11 +89,13 @@ def parse_reg(obj):
         reg.dvrights = obj["gendvrights"]
         reg.regwen = obj["regwen"].lower()
         reg.ishomog = len(obj['fields']) == 1
+        reg.tags = (obj['tags'])
+        reg.shadowed = (obj["shadowed"] == "true")
 
         # Parsing Fields
         for f in obj["fields"]:
             field = parse_field(f, reg, len(obj["fields"]))
-            if field != None:
+            if field is not None:
                 reg.fields.append(field)
                 reg.width = max(reg.width, field.msb + 1)
 
@@ -146,6 +147,8 @@ def json_to_reg(obj):
 
     block.params = obj["param_list"] if "param_list" in obj else []
 
+    block.hier_path = obj["hier_path"] if "hier_path" in obj else ""
+
     for r in obj["registers"]:
         # Check if any exception condition hit
         if 'reserved' in r:
@@ -157,7 +160,7 @@ def json_to_reg(obj):
             continue
         elif 'window' in r:
             win = parse_win(r['window'], block.width)
-            if win != None:
+            if win is not None:
                 block.wins.append(win)
             continue
 
@@ -193,7 +196,7 @@ def gen_rtl(obj, outdir):
                                    HwAccess=HwAccess,
                                    SwRdAccess=SwRdAccess,
                                    SwWrAccess=SwWrAccess))
-        except:
+        except:  # noqa: F722 for template Exception handling
             log.error(exceptions.text_error_template().render())
 
     # Generate top.sv
@@ -205,5 +208,5 @@ def gen_rtl(obj, outdir):
                                    HwAccess=HwAccess,
                                    SwRdAccess=SwRdAccess,
                                    SwWrAccess=SwWrAccess))
-        except:
+        except:  # noqa: F722 for template Exception handling
             log.error(exceptions.text_error_template().render())

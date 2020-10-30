@@ -19,14 +19,12 @@ package uart_env_pkg;
   `include "dv_macros.svh"
 
   // local types
-  // csr and mem total size for IP
-  parameter uint UART_ADDR_MAP_SIZE   = 64;
   parameter uint UART_FIFO_DEPTH = 32;
 
   typedef enum int {
     TxWatermark = 0,
     RxWatermark = 1,
-    TxOverflow  = 2,
+    TxEmpty     = 2,
     RxOverflow  = 3,
     RxFrameErr  = 4,
     RxBreakErr  = 5,
@@ -36,9 +34,9 @@ package uart_env_pkg;
   } uart_intr_e;
 
   // get the number of bytes that triggers watermark interrupt
-  function automatic int get_watermark_bytes_by_level(int lvl);
+  function automatic int get_watermark_bytes_by_level(int lvl, uart_dir_e dir);
     case(lvl)
-      0: return 1;
+      0: return dir == UartTx ? 2 : 1;
       1: return 4;
       2: return 8;
       3: return 16;
@@ -64,20 +62,19 @@ package uart_env_pkg;
     endcase
   endfunction
 
-  // nco = (2 ** 20) * freq_baud / freq_core, and truncate the factional number
-  // 2 ** 20 = 1048576
-  `define CALC_NCO(baud_rate, clk_freq_mhz) \
-    (longint'(baud_rate) * 1048576) / (clk_freq_mhz * 1000_000)
+  // nco = 16*(2 ** nco_width) * freq_baud / freq_core, and truncate the factional number
+  `define CALC_NCO(baud_rate, nco_width, clk_freq_mhz) \
+    (longint'(baud_rate) * (2**(nco_width+4))) / (clk_freq_mhz * 1000_000)
 
   // calculate the nco
-  function automatic int get_nco(baud_rate_e baud_rate, int clk_freq_mhz, int max_bits);
+  function automatic int get_nco(baud_rate_e baud_rate, int clk_freq_mhz, int nco_width);
     int nco;
-    nco = `CALC_NCO(baud_rate, clk_freq_mhz);
-    if (nco >= (2 ** max_bits)) begin
+    nco = `CALC_NCO(baud_rate, nco_width, clk_freq_mhz);
+    if (nco >= (2 ** nco_width)) begin
       `uvm_fatal("uart_agent_pkg::get_nco", $sformatf(
-                 "nco (%0d) can't bigger than (2 ** 16) - 1, it's only 16 bits \
+                 "nco (%0d) can't bigger than (2 ** %0d) - 1, it's only %0d bits \
                  baud_rate = %0d, clk_freq_mhz = %0d",
-                 nco, baud_rate, clk_freq_mhz))
+                 nco, nco_width, nco_width, baud_rate, clk_freq_mhz))
     end
     return nco;
   endfunction

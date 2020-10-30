@@ -4,6 +4,8 @@
 //
 // Description: I2C top level wrapper file
 
+`include "prim_assert.sv"
+
 module i2c (
   input                     clk_i,
   input                     rst_ni,
@@ -29,7 +31,13 @@ module i2c (
   output logic              intr_scl_interference_o,
   output logic              intr_sda_interference_o,
   output logic              intr_stretch_timeout_o,
-  output logic              intr_sda_unstable_o
+  output logic              intr_sda_unstable_o,
+  output logic              intr_trans_complete_o,
+  output logic              intr_tx_empty_o,
+  output logic              intr_tx_nonempty_o,
+  output logic              intr_tx_overflow_o,
+  output logic              intr_acq_overflow_o,
+  output logic              intr_ack_stop_o
 );
 
   import i2c_reg_pkg::*;
@@ -69,7 +77,13 @@ module i2c (
     .intr_scl_interference_o,
     .intr_sda_interference_o,
     .intr_stretch_timeout_o,
-    .intr_sda_unstable_o
+    .intr_sda_unstable_o,
+    .intr_trans_complete_o,
+    .intr_tx_empty_o,
+    .intr_tx_nonempty_o,
+    .intr_tx_overflow_o,
+    .intr_acq_overflow_o,
+    .intr_ack_stop_o
   );
 
   // For I2C, in standard, fast and fast-plus modes, outputs simulated as open-drain outputs.
@@ -82,20 +96,26 @@ module i2c (
   assign cio_scl_en_o = ~scl_int;
   assign cio_sda_en_o = ~sda_int;
 
-  `ASSERT_KNOWN(TlDValidKnownO_A, tl_o.d_valid, clk_i, !rst_ni)
-  `ASSERT_KNOWN(TlAReadyKnownO_A, tl_o.a_ready, clk_i, !rst_ni)
-  `ASSERT_KNOWN(CioSclKnownO_A, cio_scl_o, clk_i, !rst_ni)
-  `ASSERT_KNOWN(CioSclEnKnownO_A, cio_scl_en_o, clk_i, !rst_ni)
-  `ASSERT_KNOWN(CioSdaKnownO_A, cio_sda_o, clk_i, !rst_ni)
-  `ASSERT_KNOWN(CioSdaEnKnownO_A, cio_sda_en_o, clk_i, !rst_ni)
-  `ASSERT_KNOWN(IntrFmtWtmkKnownO_A, intr_fmt_watermark_o, clk_i, !rst_ni)
-  `ASSERT_KNOWN(IntrRxWtmkKnownO_A, intr_rx_watermark_o, clk_i, !rst_ni)
-  `ASSERT_KNOWN(IntrFmtOflwKnownO_A, intr_fmt_overflow_o, clk_i, !rst_ni)
-  `ASSERT_KNOWN(IntrRxOflwKnownO_A, intr_rx_overflow_o, clk_i, !rst_ni)
-  `ASSERT_KNOWN(IntrNakKnownO_A, intr_nak_o, clk_i, !rst_ni)
-  `ASSERT_KNOWN(IntrSclInterfKnownO_A, intr_scl_interference_o, clk_i, !rst_ni)
-  `ASSERT_KNOWN(IntrSdaInterfKnownO_A, intr_sda_interference_o, clk_i, !rst_ni)
-  `ASSERT_KNOWN(IntrStretchTimeoutKnownO_A, intr_stretch_timeout_o, clk_i, !rst_ni)
-  `ASSERT_KNOWN(IntrSdaUnstableKnownO_A, intr_sda_unstable_o, clk_i, !rst_ni)
+  `ASSERT_KNOWN(TlDValidKnownO_A, tl_o.d_valid)
+  `ASSERT_KNOWN(TlAReadyKnownO_A, tl_o.a_ready)
+  `ASSERT_KNOWN(CioSclKnownO_A, cio_scl_o)
+  `ASSERT_KNOWN(CioSclEnKnownO_A, cio_scl_en_o)
+  `ASSERT_KNOWN(CioSdaKnownO_A, cio_sda_o)
+  `ASSERT_KNOWN(CioSdaEnKnownO_A, cio_sda_en_o)
+  `ASSERT_KNOWN(IntrFmtWtmkKnownO_A, intr_fmt_watermark_o)
+  `ASSERT_KNOWN(IntrRxWtmkKnownO_A, intr_rx_watermark_o)
+  `ASSERT_KNOWN(IntrFmtOflwKnownO_A, intr_fmt_overflow_o)
+  `ASSERT_KNOWN(IntrRxOflwKnownO_A, intr_rx_overflow_o)
+  `ASSERT_KNOWN(IntrNakKnownO_A, intr_nak_o)
+  `ASSERT_KNOWN(IntrSclInterfKnownO_A, intr_scl_interference_o)
+  `ASSERT_KNOWN(IntrSdaInterfKnownO_A, intr_sda_interference_o)
+  `ASSERT_KNOWN(IntrStretchTimeoutKnownO_A, intr_stretch_timeout_o)
+  `ASSERT_KNOWN(IntrSdaUnstableKnownO_A, intr_sda_unstable_o)
+  `ASSERT_KNOWN(IntrTransCompleteKnownO_A, intr_trans_complete_o)
+  `ASSERT_KNOWN(IntrTxEmptyKnownO_A, intr_tx_empty_o)
+  `ASSERT_KNOWN(IntrTxNonemptyKnownO_A, intr_tx_nonempty_o)
+  `ASSERT_KNOWN(IntrTxOflwKnownO_A, intr_tx_overflow_o)
+  `ASSERT_KNOWN(IntrAcqOflwKnownO_A, intr_acq_overflow_o)
+  `ASSERT_KNOWN(IntrAckStopKnownO_A, intr_ack_stop_o)
 
 endmodule

@@ -32,12 +32,11 @@ module ibex_pmp #(
   // Access Checking Signals
   logic [33:0]                                region_start_addr [PMPNumRegions];
   logic [33:PMPGranularity+2]                 region_addr_mask  [PMPNumRegions];
-  logic [PMPNumChan-1:0][PMPNumRegions-1:0]   region_match_high;
-  logic [PMPNumChan-1:0][PMPNumRegions-1:0]   region_match_low;
-  logic [PMPNumChan-1:0][PMPNumRegions-1:0]   region_match_both;
+  logic [PMPNumChan-1:0][PMPNumRegions-1:0]   region_match_gt;
+  logic [PMPNumChan-1:0][PMPNumRegions-1:0]   region_match_lt;
+  logic [PMPNumChan-1:0][PMPNumRegions-1:0]   region_match_eq;
+  logic [PMPNumChan-1:0][PMPNumRegions-1:0]   region_match_all;
   logic [PMPNumChan-1:0][PMPNumRegions-1:0]   region_perm_check;
-  logic [PMPNumChan-1:0][PMPNumRegions-1:0]   machine_access_fault;
-  logic [PMPNumChan-1:0][PMPNumRegions-1:0]   user_access_allowed;
   logic [PMPNumChan-1:0]                      access_fault;
 
 
@@ -73,28 +72,55 @@ module ibex_pmp #(
 
   for (genvar c = 0; c < PMPNumChan; c++) begin : g_access_check
     for (genvar r = 0; r < PMPNumRegions; r++) begin : g_regions
-      // TOR Region high/low matching is reused for all match types
-      assign region_match_low[c][r]     = (pmp_req_addr_i[c][33:PMPGranularity+2] >=
-                                           // Comparators are sized according to granularity
-                                           (region_start_addr[r][33:PMPGranularity+2] &
-                                            region_addr_mask[r]));
-      assign region_match_high[c][r]    = (pmp_req_addr_i[c][33:PMPGranularity+2] <=
-                                           csr_pmp_addr_i[r][33:PMPGranularity+2]);
-      assign region_match_both[c][r]    = region_match_low[c][r] & region_match_high[c][r] &
-                                          (csr_pmp_cfg_i[r].mode != PMP_MODE_OFF);
+      // Comparators are sized according to granularity
+      assign region_match_eq[c][r] = (pmp_req_addr_i[c][33:PMPGranularity+2] &
+                                      region_addr_mask[r]) ==
+                                     (region_start_addr[r][33:PMPGranularity+2] &
+                                      region_addr_mask[r]);
+      assign region_match_gt[c][r] = pmp_req_addr_i[c][33:PMPGranularity+2] >
+                                     region_start_addr[r][33:PMPGranularity+2];
+      assign region_match_lt[c][r] = pmp_req_addr_i[c][33:PMPGranularity+2] <
+                                     csr_pmp_addr_i[r][33:PMPGranularity+2];
+
+      always_comb begin
+        region_match_all[c][r] = 1'b0;
+        unique case (csr_pmp_cfg_i[r].mode)
+          PMP_MODE_OFF   : region_match_all[c][r] = 1'b0;
+          PMP_MODE_NA4   : region_match_all[c][r] = region_match_eq[c][r];
+          PMP_MODE_NAPOT : region_match_all[c][r] = region_match_eq[c][r];
+          PMP_MODE_TOR   : begin
+            region_match_all[c][r] = (region_match_eq[c][r] | region_match_gt[c][r]) &
+                                     region_match_lt[c][r];
+          end
+          default        : region_match_all[c][r] = 1'b0;
+        endcase
+      end
+
       // Check specific required permissions
       assign region_perm_check[c][r] =
           ((pmp_req_type_i[c] == PMP_ACC_EXEC)  & csr_pmp_cfg_i[r].exec) |
           ((pmp_req_type_i[c] == PMP_ACC_WRITE) & csr_pmp_cfg_i[r].write) |
           ((pmp_req_type_i[c] == PMP_ACC_READ)  & csr_pmp_cfg_i[r].read);
-      // In machine mode, any match to a locked region without sufficient permissions is a fault
-      assign machine_access_fault[c][r] = region_match_both[c][r] & csr_pmp_cfg_i[r].lock &
-                                          ~region_perm_check[c][r];
-      // In any other mode, any access should fault unless is matches a region
-      assign user_access_allowed[c][r]  = region_match_both[c][r] & region_perm_check[c][r];
     end
-    assign access_fault[c] = (priv_mode_i[c] == PRIV_LVL_M) ? |machine_access_fault[c] :
-                                                              ~|user_access_allowed[c];
+
+    // Access fault determination / prioritization
+    always_comb begin
+      // Default is allow for M-mode, deny for other modes
+      access_fault[c] = (priv_mode_i[c] != PRIV_LVL_M);
+
+      // PMP entries are statically prioritized, from 0 to N-1
+      // The lowest-numbered PMP entry which matches an address determines accessability
+      for (int r = PMPNumRegions-1; r >= 0; r--) begin
+        if (region_match_all[c][r]) begin
+          access_fault[c] = (priv_mode_i[c] == PRIV_LVL_M) ?
+              // For M-mode, any region which matches with the L-bit clear, or with sufficient
+              // access permissions will be allowed
+              (csr_pmp_cfg_i[r].lock & ~region_perm_check[c][r]) :
+              // For other modes, the lock bit doesn't matter
+              ~region_perm_check[c][r];
+        end
+      end
+    end
 
     assign pmp_req_err_o[c] = access_fault[c];
   end

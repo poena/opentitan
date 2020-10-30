@@ -8,25 +8,44 @@ description: "Alert Handler"
 filesets:
   files_rtl:
     depend:
-      - lowrisc:ip:tlul
-      - lowrisc:prim:all
+      - lowrisc:ip:alert_handler_reg
+      - lowrisc:ip:alert_handler_component
+
+  files_formal:
     files:
-      - rtl/alert_handler_reg_pkg.sv
-      - rtl/alert_handler_reg_top.sv
-      - rtl/alert_pkg.sv
-      - rtl/alert_handler_reg_wrap.sv
-      - rtl/alert_handler_class.sv
-      - rtl/alert_handler_ping_timer.sv
-      - rtl/alert_handler_esc_timer.sv
-      - rtl/alert_handler_accu.sv
-      - rtl/alert_handler.sv
+      - dv/tb/alert_handler_bind.sv
     file_type: systemVerilogSource
+
+parameters:
+  SYNTHESIS:
+    datatype: bool
+    paramtype: vlogdefine
 
 
 targets:
   default: &default_target
     filesets:
+      - target_formal    ? (files_formal)
       - files_rtl
     toplevel: alert_handler
 
+  formal:
+    filesets:
+      - files_rtl
+      - files_formal
+    toplevel: alert_handler
 
+  lint:
+    <<: *default_target
+    default_tool: verilator
+    parameters:
+      - SYNTHESIS=true
+    tools:
+      ascentlint:
+        ascentlint_options:
+          - "-wait_license"
+          - "-stop_on_error"
+      verilator:
+        mode: lint-only
+        verilator_options:
+          - "-Wall"

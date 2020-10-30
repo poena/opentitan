@@ -29,7 +29,7 @@ module alert_handler_reg_wrap import alert_pkg::*; (
   alert_handler_reg_pkg::alert_handler_reg2hw_t reg2hw;
   alert_handler_reg_pkg::alert_handler_hw2reg_t hw2reg;
 
-  alert_handler_reg_top i_reg (
+  alert_handler_reg_top u_reg (
     .clk_i,
     .rst_ni,
     .tl_i,
@@ -46,6 +46,8 @@ module alert_handler_reg_wrap import alert_pkg::*; (
     prim_intr_hw #(
       .Width(1)
     ) i_irq_classa (
+      .clk_i,
+      .rst_ni,
       .event_intr_i           ( hw2reg_wrap.class_trig[0]    ),
       .reg2hw_intr_enable_q_i ( reg2hw.intr_enable.classa.q  ),
       .reg2hw_intr_test_q_i   ( reg2hw.intr_test.classa.q    ),
@@ -59,6 +61,8 @@ module alert_handler_reg_wrap import alert_pkg::*; (
     prim_intr_hw #(
       .Width(1)
     ) i_irq_classb (
+      .clk_i,
+      .rst_ni,
       .event_intr_i           ( hw2reg_wrap.class_trig[1]    ),
       .reg2hw_intr_enable_q_i ( reg2hw.intr_enable.classb.q  ),
       .reg2hw_intr_test_q_i   ( reg2hw.intr_test.classb.q    ),
@@ -72,6 +76,8 @@ module alert_handler_reg_wrap import alert_pkg::*; (
     prim_intr_hw #(
       .Width(1)
     ) i_irq_classc (
+      .clk_i,
+      .rst_ni,
       .event_intr_i           ( hw2reg_wrap.class_trig[2]    ),
       .reg2hw_intr_enable_q_i ( reg2hw.intr_enable.classc.q  ),
       .reg2hw_intr_test_q_i   ( reg2hw.intr_test.classc.q    ),
@@ -85,6 +91,8 @@ module alert_handler_reg_wrap import alert_pkg::*; (
     prim_intr_hw #(
       .Width(1)
     ) i_irq_classd (
+      .clk_i,
+      .rst_ni,
       .event_intr_i           ( hw2reg_wrap.class_trig[3]    ),
       .reg2hw_intr_enable_q_i ( reg2hw.intr_enable.classd.q  ),
       .reg2hw_intr_test_q_i   ( reg2hw.intr_test.classd.q    ),
@@ -170,10 +178,28 @@ module alert_handler_reg_wrap import alert_pkg::*; (
   assign reg2hw_wrap.ping_timeout_cyc = reg2hw.ping_timeout_cyc.q;
 
   // class enable
-  assign reg2hw_wrap.class_en = { reg2hw.classd_ctrl.en,
-                                  reg2hw.classc_ctrl.en,
-                                  reg2hw.classb_ctrl.en,
-                                  reg2hw.classa_ctrl.en };
+  // we require that at least one of the enable signals is
+  // set for a class to be enabled
+  assign reg2hw_wrap.class_en = { reg2hw.classd_ctrl.en & ( reg2hw.classd_ctrl.en_e3 |
+                                                            reg2hw.classd_ctrl.en_e2 |
+                                                            reg2hw.classd_ctrl.en_e1 |
+                                                            reg2hw.classd_ctrl.en_e0 ),
+                                  //
+                                  reg2hw.classc_ctrl.en & ( reg2hw.classc_ctrl.en_e3 |
+                                                            reg2hw.classc_ctrl.en_e2 |
+                                                            reg2hw.classc_ctrl.en_e1 |
+                                                            reg2hw.classc_ctrl.en_e0 ),
+                                  //
+                                  reg2hw.classb_ctrl.en & ( reg2hw.classb_ctrl.en_e3 |
+                                                            reg2hw.classb_ctrl.en_e2 |
+                                                            reg2hw.classb_ctrl.en_e1 |
+                                                            reg2hw.classb_ctrl.en_e0 ),
+                                  //
+                                  reg2hw.classa_ctrl.en & ( reg2hw.classa_ctrl.en_e3 |
+                                                            reg2hw.classa_ctrl.en_e2 |
+                                                            reg2hw.classa_ctrl.en_e1 |
+                                                            reg2hw.classa_ctrl.en_e0 ) };
+
 
   // autolock enable
   assign class_autolock_en = { reg2hw.classd_ctrl.lock,
@@ -283,4 +309,3 @@ module alert_handler_reg_wrap import alert_pkg::*; (
   assign crashdump_o.class_esc_state = hw2reg_wrap.class_esc_state;
 
 endmodule : alert_handler_reg_wrap
-

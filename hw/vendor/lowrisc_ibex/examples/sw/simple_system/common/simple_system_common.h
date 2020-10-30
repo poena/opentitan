@@ -10,6 +10,7 @@
 
 #define DEV_WRITE(addr, val) (*((volatile uint32_t *)(addr)) = val)
 #define DEV_READ(addr, val) (*((volatile uint32_t *)(addr)))
+#define PCOUNT_READ(name, dst) asm volatile("csrr %0, " #name ";" : "=r"(dst))
 
 /**
  * Writes character to simulator out log. Signature matches c stdlib function
@@ -54,5 +55,34 @@ void pcount_enable(int enable);
  * as the mhpmcounterN counters.
  */
 void pcount_reset();
+
+/**
+ * Enables timer interrupt
+ *
+ * @param time_base Number of time ticks to count before interrupt
+ */
+void timer_enable(uint64_t time_base);
+
+/**
+ * Returns current mtime value
+ */
+uint64_t timer_read(void);
+
+/**
+ * Set a new timer value
+ *
+ * @param new_time New value for time
+ */
+void timecmp_update(uint64_t new_time);
+
+/**
+ * Disables timer interrupt
+ */
+void timer_disable(void);
+
+/**
+ * Returns current global time value
+ */
+uint64_t get_elapsed_time(void);
 
 #endif

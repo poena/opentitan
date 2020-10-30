@@ -20,6 +20,10 @@ class uart_perf_vseq extends uart_fifo_full_vseq;
     wait_for_idle == 0;
   }
 
+  constraint dly_to_rx_read_c {
+    dly_to_rx_read == 0;
+  }
+
   constraint dly_to_access_intr_c {
     dly_to_access_intr dist {
       0                   :/ 5,

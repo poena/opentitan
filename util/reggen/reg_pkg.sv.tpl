@@ -15,7 +15,7 @@ package ${block.name}_reg_pkg;
   // Param list
 % endif
 % for param in [p for p in block.params if p["local"] == "true"]:
-  localparam ${param["type"]} ${param["name"]} = ${param["default"]};
+  parameter ${param["type"]} ${param["name"]} = ${param["default"]};
 % endfor
 
   ////////////////////////////
@@ -29,8 +29,12 @@ package ${block.name}_reg_pkg;
     % if r.get_field_flat(0).hwqe:
     logic        qe;
     % endif
-    % if r.get_field_flat(0).hwre:
+    % if r.get_field_flat(0).hwre or (r.get_field_flat(0).shadowed and r.get_field_flat(0).hwext):
     logic        re;
+    % endif
+    % if r.get_field_flat(0).shadowed and not r.get_field_flat(0).hwext:
+    logic        err_update;
+    logic        err_storage;
     % endif
   } ${block.name + "_reg2hw_" + r.name + ("_mreg_t" if r.is_multi_reg() else "_reg_t")};
 
@@ -44,8 +48,12 @@ package ${block.name}_reg_pkg;
       % if f.hwqe:
       logic        qe;
       % endif
-      % if f.hwre:
+      % if f.hwre or (f.shadowed and f.hwext):
       logic        re;
+      % endif
+      % if f.shadowed and not f.hwext:
+      logic        err_update;
+      logic        err_storage;
       % endif
     } ${f.get_basename() if r.is_multi_reg() else f.name};
       %endif
@@ -87,7 +95,7 @@ package ${block.name}_reg_pkg;
   // Register to internal design logic //
   ///////////////////////////////////////
 <%
-nbits = block.get_n_bits(["q","qe","re"]) - 1
+nbits = block.get_n_bits(["q","qe","re"])
 packbit = 0
 %>\
 % if nbits > 0:
@@ -100,12 +108,12 @@ packbit = 0
   for d in r.get_nested_dims():
     array_dims += "[%d:0]" % (d-1)
 %>\
-    ${block.name + "_reg2hw_" + r.name + "_mreg_t"} ${array_dims} ${r.name}; // [${nbits - packbit}:${nbits - (packbit + r.get_n_bits(["q", "qe", "re"]) - 1)}]<% packbit += r.get_n_bits(["q", "qe", "re"]) %>\
+    ${block.name + "_reg2hw_" + r.name + "_mreg_t"} ${array_dims} ${r.name}; // [${nbits - packbit - 1}:${nbits - (packbit + r.get_n_bits(["q", "qe", "re"]))}]<% packbit += r.get_n_bits(["q", "qe", "re"]) %>\
 
   ######################## register ###########################
   % elif r.get_n_bits(["q"]):
     ## Only one field, should use register name as it is
-    ${block.name + "_reg2hw_" + r.name + "_reg_t"} ${r.name}; // [${nbits - packbit}:${nbits - (packbit + r.get_n_bits(["q", "qe", "re"]) - 1)}]<% packbit += r.get_n_bits(["q", "qe", "re"]) %>\
+    ${block.name + "_reg2hw_" + r.name + "_reg_t"} ${r.name}; // [${nbits - packbit - 1}:${nbits - (packbit + r.get_n_bits(["q", "qe", "re"]))}]<% packbit += r.get_n_bits(["q", "qe", "re"]) %>\
 
   % endif
 % endfor
@@ -116,7 +124,7 @@ packbit = 0
   // Internal design logic to register //
   ///////////////////////////////////////
 <%
-nbits = block.get_n_bits(["d","de"]) - 1
+nbits = block.get_n_bits(["d","de"])
 packbit = 0
 %>\
 % if nbits > 0:
@@ -129,12 +137,12 @@ packbit = 0
   for d in r.get_nested_dims():
     array_dims += "[%d:0]" % (d-1)
 %>\
-    ${block.name + "_hw2reg_" + r.name + "_mreg_t"} ${array_dims} ${r.name}; // [${nbits - packbit}:${nbits - (packbit + r.get_n_bits(["d", "de"]) - 1)}]<% packbit += r.get_n_bits(["d", "de"]) %>\
+    ${block.name + "_hw2reg_" + r.name + "_mreg_t"} ${array_dims} ${r.name}; // [${nbits - packbit - 1}:${nbits - (packbit + r.get_n_bits(["d", "de"]))}]<% packbit += r.get_n_bits(["d", "de"]) %>\
 
   ######################## register with single field ###########################
   % elif r.get_n_bits(["d"]):
     ## Only one field, should use register name as it is
-    ${block.name + "_hw2reg_" + r.name + "_reg_t"} ${r.name}; // [${nbits - packbit}:${nbits - (packbit + r.get_n_bits(["q", "qe", "re"]) - 1)}]<% packbit += r.get_n_bits(["q", "qe", "re"]) %>\
+    ${block.name + "_hw2reg_" + r.name + "_reg_t"} ${r.name}; // [${nbits - packbit - 1}:${nbits - (packbit + r.get_n_bits(["q", "qe", "re"]))}]<% packbit += r.get_n_bits(["q", "qe", "re"]) %>\
 
   % endif
 % endfor
@@ -143,15 +151,15 @@ packbit = 0
 
   // Register Address
 % for r in block.get_regs_flat():
-  parameter ${block.name.upper()}_${r.name.upper()}_OFFSET = ${block.addr_width}'h ${"%x" % r.offset};
+  parameter logic [${block.addr_width-1}:0] ${block.name.upper()}_${r.name.upper()}_OFFSET = ${block.addr_width}'h ${"%x" % r.offset};
 % endfor
 
 % if len(block.wins) > 0:
   // Window parameter
 % endif
 % for i,w in enumerate(block.wins):
-  parameter ${block.name.upper()}_${w.name.upper()}_OFFSET = ${block.addr_width}'h ${"%x" % w.base_addr};
-  parameter ${block.name.upper()}_${w.name.upper()}_SIZE   = ${block.addr_width}'h ${"%x" % (w.limit_addr - w.base_addr)};
+  parameter logic [${block.addr_width-1}:0] ${block.name.upper()}_${w.name.upper()}_OFFSET = ${block.addr_width}'h ${"%x" % w.base_addr};
+  parameter logic [${block.addr_width-1}:0] ${block.name.upper()}_${w.name.upper()}_SIZE   = ${block.addr_width}'h ${"%x" % (w.limit_addr - w.base_addr)};
 % endfor
 
   // Register Index
@@ -162,7 +170,7 @@ packbit = 0
   } ${block.name}_id_e;
 
   // Register width information to check illegal writes
-  localparam logic [3:0] ${block.name.upper()}_PERMIT [${block.get_n_regs_flat()}] = '{
+  parameter logic [3:0] ${block.name.upper()}_PERMIT [${block.get_n_regs_flat()}] = '{
 % for i,r in enumerate(block.get_regs_flat()):
 <% index_str = "{}".format(i).rjust(max_regs_char) %>\
   % if r.width > 24:

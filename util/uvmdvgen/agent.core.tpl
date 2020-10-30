@@ -2,7 +2,7 @@ CAPI=2:
 # Copyright lowRISC contributors.
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
-name: "lowrisc:dv:${name}_agent:0.1"
+name: "${vendor}:dv:${name}_agent:0.1"
 description: "${name.upper()} DV UVM agent"
 filesets:
   files_dv:
@@ -12,9 +12,9 @@ filesets:
     files:
       - ${name}_if.sv
       - ${name}_agent_pkg.sv
+      - ${name}_item.sv: {is_include_file: true}
       - ${name}_agent_cfg.sv: {is_include_file: true}
       - ${name}_agent_cov.sv: {is_include_file: true}
-      - ${name}_item.sv: {is_include_file: true}
 % if has_separate_host_device_driver:
       - ${name}_host_driver.sv: {is_include_file: true}
       - ${name}_device_driver.sv: {is_include_file: true}

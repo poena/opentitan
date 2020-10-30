@@ -4,6 +4,8 @@
 //
 // General Purpose Input/Output module
 
+`include "prim_assert.sv"
+
 module gpio (
   input clk_i,
   input rst_ni,
@@ -104,6 +106,8 @@ module gpio (
 
   // instantiate interrupt hardware primitive
   prim_intr_hw #(.Width(32)) intr_hw (
+    .clk_i,
+    .rst_ni,
     .event_intr_i           (event_intr_combined),
     .reg2hw_intr_enable_q_i (reg2hw.intr_enable.q),
     .reg2hw_intr_test_q_i   (reg2hw.intr_test.q),
@@ -141,8 +145,8 @@ module gpio (
   );
 
   // Assert Known: Outputs
-  `ASSERT_KNOWN(IntrGpioKnown, intr_gpio_o, clk_i, !rst_ni)
-  `ASSERT_KNOWN(CioGpioEnOKnown, cio_gpio_en_o, clk_i, !rst_ni)
-  `ASSERT_KNOWN(CioGpioOKnown, cio_gpio_o, clk_i, !rst_ni)
+  `ASSERT_KNOWN(IntrGpioKnown, intr_gpio_o)
+  `ASSERT_KNOWN(CioGpioEnOKnown, cio_gpio_en_o)
+  `ASSERT_KNOWN(CioGpioOKnown, cio_gpio_o)
 
 endmodule

@@ -2,39 +2,39 @@
 title: "TL-UL Checklist"
 ---
 
-This checklist is for [Hardware Stage]({{< relref "/doc/project/hw_stages.md" >}}) transitions for the [TL-UL component.]({{<relref "/hw/ip/tlul/doc">}})
+This checklist is for [Hardware Stage]({{< relref "/doc/project/development_stages.md" >}}) transitions for the [TL-UL component.]({{<relref "/hw/ip/tlul/doc">}})
 All checklist items refer to the content in the [Checklist]({{< relref "/doc/project/checklist.md" >}}).
 
 ## Design Checklist
 
 ### D1
 
-Type          | Item                  | Resolution  | Note/Collaterals
---------------|-----------------------|-------------|------------------
-Documentation | [SPEC_COMPLETE][]     | Done        | [TL-UL Spec][] [crossbar_tool][]
-Documentation | [CSR_DEFINED][]       | N/A         |
-RTL           | [CLKRST_CONNECTED][]  | Done        |
-RTL           | [IP_TOP][]            | Done        |
-RTL           | [IP_INSTANTIABLE][]      | Done        |
-RTL           | [MEM_INSTANCED_80][]  | N/A         |
-RTL           | [FUNC_IMPLEMENTED][]  | Done        |
-RTL           | [ASSERT_KNOWN_ADDED][]| Done        |
-Code Quality  | [LINT_SETUP][]        | Done        |
-Review        | Reviewer(s)           | Done        | @weicaiyang @aytong @martin-lueker
-Review        | Signoff date          | Done        | 2019-11-04
+Type          | Item                           | Resolution  | Note/Collaterals
+--------------|--------------------------------|-------------|------------------
+Documentation | [SPEC_COMPLETE][]              | Done        | [TL-UL Spec][] [crossbar_tool][]
+Documentation | [CSR_DEFINED][]                | N/A         |
+RTL           | [CLKRST_CONNECTED][]           | Done        |
+RTL           | [IP_TOP][]                     | Done        |
+RTL           | [IP_INSTANTIABLE][]            | Done        |
+RTL           | [PHYSICAL_MACROS_DEFINED_80][] | N/A         |
+RTL           | [FUNC_IMPLEMENTED][]           | Done        |
+RTL           | [ASSERT_KNOWN_ADDED][]         | Done        |
+Code Quality  | [LINT_SETUP][]                 | Done        |
+Review        | Reviewer(s)                    | Done        | @weicaiyang @aytong @martin-lueker
+Review        | Signoff date                   | Done        | 2019-11-04
 
 [TL-UL Spec]:         {{<relref "/hw/ip/tlul/doc">}}
 [crossbar_tool]:      {{<relref "/doc/rm/crossbar_tool">}}
 
-[SPEC_COMPLETE]:      {{<relref "/doc/project/checklist.md#spec-complete" >}}
-[CSR_DEFINED]:        {{<relref "/doc/project/checklist.md#csr-defined" >}}
-[CLKRST_CONNECTED]:   {{<relref "/doc/project/checklist.md#clkrst-connected" >}}
-[IP_TOP]:             {{<relref "/doc/project/checklist.md#ip-top" >}}
-[IP_INSTANTIABLE]:    {{<relref "/doc/project/checklist.md#ip-instantiable" >}}
-[MEM_INSTANCED_80]:   {{<relref "/doc/project/checklist.md#mem-instanced-80" >}}
-[FUNC_IMPLEMENTED]:   {{<relref "/doc/project/checklist.md#func-implemented" >}}
-[ASSERT_KNOWN_ADDED]: {{<relref "/doc/project/checklist.md#assert-known-added" >}}
-[LINT_SETUP]:         {{<relref "/doc/project/checklist.md#lint-setup" >}}
+[SPEC_COMPLETE]:              {{<relref "/doc/project/checklist.md#spec-complete" >}}
+[CSR_DEFINED]:                {{<relref "/doc/project/checklist.md#csr-defined" >}}
+[CLKRST_CONNECTED]:           {{<relref "/doc/project/checklist.md#clkrst-connected" >}}
+[IP_TOP]:                     {{<relref "/doc/project/checklist.md#ip-top" >}}
+[IP_INSTANTIABLE]:            {{<relref "/doc/project/checklist.md#ip-instantiable" >}}
+[PHYSICAL_MACROS_DEFINED_80]: {{<relref "/doc/project/checklist.md#physical_macros_defined-80" >}}
+[FUNC_IMPLEMENTED]:           {{<relref "/doc/project/checklist.md#func-implemented" >}}
+[ASSERT_KNOWN_ADDED]:         {{<relref "/doc/project/checklist.md#assert-known-added" >}}
+[LINT_SETUP]:                 {{<relref "/doc/project/checklist.md#lint-setup" >}}
 
 ### D2
 
@@ -55,6 +55,9 @@ Code Quality  | [LINT_PASS][]           | Done        |
 Code Quality  | [CDC_SETUP][]           | N/A         | top_earlgrey uses single clock at this moment. (new PR by Tim is pending )
 Code Quality  | [FPGA_TIMING][]         | Done        | Pipeline inserted in front of Core IBEX. meet timing @ 50MHz on NexysVideo
 Code Quality  | [CDC_SYNCMACRO][]       | N/A         |
+Security      | [SEC_CM_IMPLEMENTED][]  | N/A         |
+Security      | [SEC_NON_RESET_FLOPS][] | N/A         |
+Security      | [SEC_SHADOW_REGS][]     | N/A         |
 Review        | Reviewer(s)             | Done        | @sjgitty @weicaiyang
 Review        | Signoff date            | Done        | 2019-11-04
 
@@ -75,6 +78,9 @@ Review        | Signoff date            | Done        | 2019-11-04
 [CDC_SETUP]:           {{<relref "/doc/project/checklist.md#cdc-setup" >}}
 [CDC_SYNCMACRO]:       {{<relref "/doc/project/checklist.md#cdc-syncmacro" >}}
 [FPGA_TIMING]:         {{<relref "/doc/project/checklist.md#fpga-timing" >}}
+[SEC_CM_IMPLEMENTED]:  {{<relref "/doc/project/checklist.md#sec-cm-implemented" >}}
+[SEC_NON_RESET_FLOPS]: {{<relref "/doc/project/checklist.md#sec-non-reset-flops" >}}
+[SEC_SHADOW_REGS]:     {{<relref "/doc/project/checklist.md#sec-shadow-regs" >}}
 
 ### D3
 

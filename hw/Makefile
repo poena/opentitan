@@ -1,3 +1,7 @@
+# Copyright lowRISC contributors.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+
 CUR_DIR := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 PRJ_DIR := $(realpath ${CUR_DIR}/../)
 export PRJ_DIR
@@ -5,20 +9,34 @@ export PRJ_DIR
 REG_OUTPUT_DIR    ?= ${PRJ_DIR}/build/regs-generated
 REG_OUTPUT_DV_DIR ?= ${REG_OUTPUT_DIR}/dv
 REG_OUTPUT_SW_DIR ?= ${REG_OUTPUT_DIR}/sw
-REG_OUTPUT_FPV_CSR_DIR ?= ${REG_OUTPUT_DIR}/fpv/vip
 
-IPS ?= uart          \
-       gpio          \
-       rv_plic       \
-       flash_ctrl    \
-       spi_device    \
-       rv_timer      \
-       hmac          \
-       usbuart       \
+IPS ?= aes           \
        alert_handler \
-       pinmux        \
+       clkmgr        \
+       entropy_src   \
+       flash_ctrl    \
+       gpio          \
+       hmac          \
+       kmac          \
+       i2c           \
+       keymgr        \
+       lc_ctrl       \
+       nmi_gen       \
+       otp_ctrl      \
        padctrl       \
-       nmi_gen
+       pinmux        \
+       pwrmgr        \
+       rstmgr        \
+       rv_plic       \
+       rv_timer      \
+       sensor_ctrl   \
+       spi_device    \
+       sram_ctrl     \
+       trial1        \
+       otbn          \
+       uart          \
+       usbdev        \
+       usbuart
 
 TOPS ?= top_earlgrey
 
@@ -41,7 +59,7 @@ tops_gen = $(addsuffix _gen,$(TOPS))
 
 tops_reg = $(addsuffix _reg,$(TOPS))
 
-all: $(dynips_reg) $(tops_gen) $(tops_reg) banner
+all: $(dynips_reg) $(tops_gen) $(tops_reg) banner otp-mmap
 
 banner:
 	@echo "############################################"
@@ -55,16 +73,16 @@ pre_reg:
 	mkdir -p ${REG_OUTPUT_DIR}
 	mkdir -p ${REG_OUTPUT_DV_DIR}
 	mkdir -p ${REG_OUTPUT_SW_DIR}
-	mkdir -p ${REG_OUTPUT_FPV_CSR_DIR}
 
 $(ips_reg): pre_reg
 	if [ -f ${PRJ_DIR}/hw/ip/$(subst _reg,,$@)/$(dir_hjson)/$(subst _reg,,$@).hjson ]; then \
-		${PRJ_DIR}/util/regtool.py -r ${PRJ_DIR}/hw/ip/$(subst _reg,,$@)/$(dir_hjson)/$(subst _reg,,$@).hjson; \
+		${PRJ_DIR}/util/regtool.py ${toolflags} -r ${PRJ_DIR}/hw/ip/$(subst _reg,,$@)/$(dir_hjson)/$(subst _reg,,$@).hjson; \
 		${PRJ_DIR}/util/regtool.py -s -t ${REG_OUTPUT_DV_DIR} \
 		  ${PRJ_DIR}/hw/ip/$(subst _reg,,$@)/$(dir_hjson)/$(subst _reg,,$@).hjson; \
-		${PRJ_DIR}/util/regtool.py -f -t ${REG_OUTPUT_FPV_CSR_DIR} \
-		  ${PRJ_DIR}/hw/ip/$(subst _reg,,$@)/$(dir_hjson)/$(subst _reg,,$@).hjson; \
 	fi
+
+otp-mmap:
+	cd ${PRJ_DIR}/hw/ip/otp_ctrl/util && ./translate-mmap.py
 
 regs-header: $(ips_reg_header) banner
 

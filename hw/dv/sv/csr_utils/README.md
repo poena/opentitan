@@ -78,7 +78,7 @@ via the functions above.
 This package provides methods to access CSR or Memory attributes, such as address,
 value, etc. Examples are:
  * `get_csr_addrs`
- * `get_mem_addrs`
+ * `get_mem_addr_ranges`
  * `decode_csr_or_field`
 
 ##### Global methods for CSR access
@@ -140,7 +140,7 @@ Examples of useful functions in this class are:
       CsrExclWriteCheck = 3'b010, // exclude csr from write-read check
       CsrExclCheck      = 3'b011, // exclude csr from init or write-read check
       CsrExclWrite      = 3'b100, // exclude csr from write
-      CsrExclAll        = 3'b111  // exclude csr from init or write or writ-read check
+      CsrExclAll        = 3'b111  // exclude csr from init or write or write-read check
     } csr_excl_type_e;
     ```
 

@@ -8,7 +8,6 @@
 #  - n_alerts:    Number of alert sources
 #  - esc_cnt_dw:  Width of escalation counter
 #  - accu_cnt_dw: Width of accumulator
-#  - lfsr_seed:   Seed for LFSR timer
 #  - async_on:    Enables asynchronous sygnalling between specific alert RX/TX pairs
 #  - n_classes:   Number of supported classes (leave this at 4 at the moment)
 <%
@@ -20,6 +19,7 @@ chars = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
   clock_primary: "clk_i",
   bus_device: "tlul",
   regwidth: "32",
+  hier_path: "i_reg_wrap"
 ##############################################################################
   param_list: [
     { name: "NAlerts",
@@ -38,12 +38,6 @@ chars = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
       desc: "Number of peripheral outputs",
       type: "int",
       default: "${accu_cnt_dw}",
-      local: "true"
-    },
-    { name: "LfsrSeed",
-      desc: "Number of peripheral outputs",
-      type: "int",
-      default: "${lfsr_seed}",
       local: "true"
     },
     { name: "AsyncOn",
@@ -95,6 +89,15 @@ chars = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
       local: "true"
     },
   ],
+
+  inter_signal_list: [
+    { struct:  "alert_crashdump",
+      type:    "uni",
+      name:    "crashdump",
+      act:     "req",
+      package: "alert_pkg"
+    },
+  ]
 ##############################################################################
 # interrupt registers for the classes
   interrupt_list: [
@@ -196,7 +199,10 @@ chars = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
       hwaccess: "hrw",
       fields: [
         { bits: "0", name: "A", desc: "Cause bit " }
-      ]
+      ],
+      tags: [// The value of this register is determined by triggering different kinds of alerts
+             // Cannot be auto-predicted so excluded from read check
+             "excl:CsrNonInitTests:CsrExclWriteCheck"]
       }
     },
 ##############################################################################
@@ -251,6 +257,11 @@ chars = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
       cname: "LOC_ALERT",
       swaccess: "rw1c",
       hwaccess: "hrw",
+      tags: [// Top level CSR automation test, CPU clock is disabled, so escalation response will
+             // not send back to alert handler. This will set loc_alert_cause and could not predict
+             // automatically.
+             // TODO: remove the exclusion after set up top-level esc_receiver_driver
+             "excl:CsrNonInitTests:CsrExclCheck"],
       fields: [
         { bits: "0", name: "LA", desc: "Cause bit " }
       ]
@@ -317,7 +328,7 @@ chars = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
         { bits: "11:10",
           name: "MAP_E2",
           resval: 2,
-          desc: "Determine sin which escalation phase escalation signal 2 shall be asserted.",
+          desc: "Determines in which escalation phase escalation signal 2 shall be asserted.",
         }
         { bits: "13:12",
           name: "MAP_E3",
@@ -340,7 +351,11 @@ chars = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
           ''',
           resval: 1,
         }
-      ]
+      ],
+      tags: [// The value of this register is set to false only by hardware,
+             // under the condition that escalation is triggered and the corresponding lock bit is true
+             // Cannot not be auto-predicted so it is excluded from read check
+             "excl:CsrNonInitTests:CsrExclWriteCheck"]
     },
     { name:     "CLASS${chars[i]}_CLR",
       desc:     '''
@@ -368,7 +383,10 @@ chars = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
       hwext:    "true",
       fields: [
         { bits: "${accu_cnt_dw - 1}:0" }
-      ]
+      ],
+      tags: [// The value of this register is determined by how many alerts have been triggered
+             // Cannot be auto-predicted so it is excluded from read check
+             "excl:CsrNonInitTests:CsrExclWriteCheck"]
     },
     { name:     "CLASS${chars[i]}_ACCUM_THRESH",
       desc:     '''
@@ -440,7 +458,10 @@ chars = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
           is set to false (either by SW or by HW via the !!CLASS${chars[i]}_CTRL.LOCK feature).
           '''
         }
-      ]
+      ],
+      tags: [// The value of this register is determined by counting how many cycles the escalation phase has lasted
+             // Cannot be auto-predicted so excluded from read check
+             "excl:CsrNonInitTests:CsrExclWriteCheck"]
     },
     { name:     "CLASS${chars[i]}_STATE",
       desc:     '''
@@ -461,7 +482,10 @@ chars = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
                   { value: "0b111", name: "Phase3",   desc: "Escalation Phase3 is active." }
                 ]
         }
-      ]
+      ],
+      tags: [// The current escalation state cannot be auto-predicted
+             // so this register is excluded from read check
+             "excl:CsrNonInitTests:CsrExclWriteCheck"]
     },
 % endfor
   ],

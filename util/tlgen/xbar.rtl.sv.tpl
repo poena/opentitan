@@ -6,6 +6,9 @@
 // all reset signals should be generated from one reset signal to not make any deadlock
 //
 // Interconnect
+<%
+  import tlgen.lib as lib
+%>\
 % for host in xbar.hosts:
 ${xbar.repr_tree(host, 0)}
 % endfor
@@ -157,15 +160,34 @@ module xbar_${xbar.name} (
   leaf = xbar.get_leaf_from_s1n(block, loop.index);
   name_space = "ADDR_SPACE_" + leaf.name.upper();
   name_mask  = "ADDR_MASK_" + leaf.name.upper();
+  prefix = "if (" if loop.first else "end else if ("
 %>\
-  % if loop.first:
-    if ((${addr_sig} & ~(${name_mask})) == ${name_space}) begin
-  % else:
-    end else if ((${addr_sig} & ~(${name_mask})) == ${name_space}) begin
-  % endif
+  % if len(leaf.addr_range) == 1:
+      % if lib.is_pow2((leaf.addr_range[0][1]-leaf.addr_range[0][0])+1):
+    ${prefix}(${addr_sig} & ~(${name_mask})) == ${name_space}) begin
+      % else:
+    ${prefix}((${addr_sig} <= (${name_mask} + ${name_space})) &&
+       (${addr_sig} >= ${name_space}))) begin
+      % endif
       dev_sel_${block.name} = ${"%d'd%d" % (sel_len, loop.index)};
-  % if loop.last:
-    end
+${"end" if loop.last else ""}
+  % else:
+    ## Xbar device port
+<%
+  num_range = len(leaf.addr_range)
+%>\
+    ${prefix}
+    % for i in range(num_range):
+      % if lib.is_pow2(leaf.addr_range[i][1]-leaf.addr_range[0][0]+1):
+      ((${addr_sig} & ~(${name_mask}[${i}])) == ${name_space}[${i}])${" ||" if not loop.last else ""}
+      % else:
+      ((${addr_sig} <= (${name_mask}[${i}] + ${name_space}[${i}])) &&
+       (${addr_sig} >= ${name_space}[${i}]))${" ||" if not loop.last else ""}
+      % endif
+    % endfor
+    ) begin
+      dev_sel_${block.name} = ${"%d'd%d" % (sel_len, loop.index)};
+${"end" if loop.last else ""}
   % endif
 % endfor
   end
@@ -202,9 +224,9 @@ module xbar_${xbar.name} (
     .DReqPass  (${len(block.ds)}'h${"%x" % block.dpass}),
     .DRspPass  (${len(block.ds)}'h${"%x" % block.dpass}),
     % endif
-    % if block.hdepth != 2:
-    .DReqDepth ({${len(block.ds)}{4'h${block.ddepth}}}),
-    .DRspDepth ({${len(block.ds)}{4'h${block.ddepth}}}),
+    % if block.ddepth != 2:
+    .DReqDepth (${len(block.ds)*4}'h${"%x" % block.ddepth}),
+    .DRspDepth (${len(block.ds)*4}'h${"%x" % block.ddepth}),
     % endif
     .N         (${len(block.ds)})
   ) u_${block.name} (
@@ -214,7 +236,7 @@ module xbar_${xbar.name} (
     .tl_h_o       (tl_${block.name}_us_d2h),
     .tl_d_o       (tl_${block.name}_ds_h2d),
     .tl_d_i       (tl_${block.name}_ds_d2h),
-    .dev_select   (dev_sel_${block.name})
+    .dev_select_i (dev_sel_${block.name})
   );
   % elif block.node_type.name == "SOCKET_M1":
   tlul_socket_m1 #(
@@ -223,16 +245,16 @@ module xbar_${xbar.name} (
     .HRspPass  (${len(block.us)}'h${"%x" % block.hpass}),
     % endif
     % if block.hdepth != 2:
-    .HReqDepth ({${len(block.us)}{4'h${block.hdepth}}}),
-    .HRspDepth ({${len(block.us)}{4'h${block.hdepth}}}),
-    % endif
-    % if block.ddepth != 2:
-    .DReqDepth (4'h${block.ddepth}),
-    .DRspDepth (4'h${block.ddepth}),
+    .HReqDepth (${len(block.us)*4}'h${"%x" % block.hdepth}),
+    .HRspDepth (${len(block.us)*4}'h${"%x" % block.hdepth}),
     % endif
     % if block.dpass != 1:
     .DReqPass  (1'b${block.dpass}),
     .DRspPass  (1'b${block.dpass}),
+    % endif
+    % if block.ddepth != 2:
+    .DReqDepth (4'h${block.ddepth}),
+    .DRspDepth (4'h${block.ddepth}),
     % endif
     .M         (${len(block.us)})
   ) u_${block.name} (

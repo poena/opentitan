@@ -8,8 +8,6 @@ description: "RISC-V PLIC"
 filesets:
   files_rtl:
     depend:
-      - lowrisc:ip:tlul
-      - lowrisc:prim:all
       - lowrisc:ip:rv_plic_component
     files:
       - rtl/rv_plic_reg_pkg.sv
@@ -17,8 +15,33 @@ filesets:
       - rtl/rv_plic.sv
     file_type: systemVerilogSource
 
+
+parameters:
+  SYNTHESIS:
+    datatype: bool
+    paramtype: vlogdefine
+
+
 targets:
   default: &default_target
     filesets:
       - files_rtl
     toplevel: rv_plic
+
+  lint:
+    <<: *default_target
+    default_tool: verilator
+    parameters:
+      - SYNTHESIS=true
+    tools:
+      ascentlint:
+        ascentlint_options:
+          - "-wait_license"
+          - "-stop_on_error"
+      verilator:
+        mode: lint-only
+        verilator_options:
+          - "-Wall"
+
+
+

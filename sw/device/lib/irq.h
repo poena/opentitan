@@ -2,16 +2,18 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 
-#ifndef _IRQ_H_
-#define _IRQ_H_
+#ifndef OPENTITAN_SW_DEVICE_LIB_IRQ_H_
+#define OPENTITAN_SW_DEVICE_LIB_IRQ_H_
 
 #include <stdbool.h>
 #include <stdint.h>
 
 /**
  * Update to the location of vectors as specificed in the linker file
+ *
+ * The address must be 256-byte aligned.
  */
-extern void update_mtvec(char *ptr);
+void irq_set_vector_offset(uintptr_t address);
 
 /**
  * Enable / disable ibex globlal interrupts
@@ -33,4 +35,4 @@ void irq_timer_ctrl(bool en);
  */
 void irq_software_ctrl(bool en);
 
-#endif
+#endif  // OPENTITAN_SW_DEVICE_LIB_IRQ_H_

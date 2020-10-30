@@ -22,9 +22,12 @@ package spi_device_env_pkg;
   // local parameters and types
   typedef enum {
     RxFifoFull,
-    RxFifoGtLevel,
+    RxFifoGeLevel,
     TxFifoLtLevel,
-    RxFwModeErr
+    RxFwModeErr,
+    RxFifoOverflow,
+    TxFifoUnderflow,
+    NumSpiDevIntr
   } spi_device_intr_e;
 
   typedef enum bit {
@@ -32,14 +35,13 @@ package spi_device_env_pkg;
     SramSpaceAvail
   } sram_avail_type_e;
 
-  // csr and mem total size for IP
-  parameter uint SPI_DEVICE_ADDR_MAP_SIZE = 4096;
   // SPI SRAM is 2kB
   parameter uint SRAM_OFFSET              = 'h800;
   parameter uint SRAM_SIZE                = 2048;
   parameter uint SRAM_MSB                 = $clog2(SRAM_SIZE) - 1;
   parameter uint SRAM_PTR_PHASE_BIT       = SRAM_MSB + 1;
   parameter uint SRAM_WORD_SIZE           = 4;
+  parameter uint ASYNC_FIFO_SIZE          = 8;
 
   string msg_id = "spi_device_env_pkg";
 
@@ -95,11 +97,11 @@ package spi_device_env_pkg;
   endfunction
 
   // macros
-  `define get_tx_allocated_sram_size_bytes \
+  `define GET_TX_ALLOCATED_SRAM_SIZE_BYTES \
     get_allocated_sram_size_bytes(ral.txf_addr.base.get_mirrored_value(), \
                                   ral.txf_addr.limit.get_mirrored_value())
 
-  `define get_rx_allocated_sram_size_bytes \
+  `define GET_RX_ALLOCATED_SRAM_SIZE_BYTES \
     get_allocated_sram_size_bytes(ral.rxf_addr.base.get_mirrored_value(), \
                                   ral.rxf_addr.limit.get_mirrored_value())
 
@@ -111,6 +113,6 @@ package spi_device_env_pkg;
   `include "spi_device_env.sv"
   `include "spi_device_vseq_list.sv"
 
-  `undef get_tx_allocated_sram_size_bytes
-  `undef get_rx_allocated_sram_size_bytes
+  `undef GET_TX_ALLOCATED_SRAM_SIZE_BYTES
+  `undef GET_RX_ALLOCATED_SRAM_SIZE_BYTES
 endpackage

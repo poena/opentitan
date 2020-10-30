@@ -60,13 +60,17 @@ if (foo) {
 
 ***Comments should be `// C99-style` for consistency with C++.***
 
-***Variables mentioned in comments should be delimited with pipe (`|`) characters.***
+<!-- To render a backtick in inline code in markdown, you need to double the surrounding backticks.
+https://daringfireball.net/projects/markdown/syntax#code -->
+***Variables mentioned in comments should be delimited with backtick (`` ` ``) characters.***
 
 Example:
 
 ```c
-// |ptr| can never be NULL for reasons.
+// `ptr` can never be NULL for reasons.
 ```
+
+Note also [Public function (API) documentation](#public-function-api-documentation) below.
 
 ### TODO Comments
 ***TODO comments should be in the format `TODO: message`.***
@@ -114,14 +118,19 @@ The above rules also do not apply to system includes, which should be included b
 The first line of the comment is the summary, followed by a new line, and an optional longer description.
 Input arguments and return arguments can be documented with `@param` and `@return` if they are not self-explanatory from the name.
 
+The documentation tool will also render markdown within descriptions, so backticks should be used to get monospaced text.
+It can also generate references to other named declarations using `#other_function` (for C-style declarations), or `ns::foo` (for C++ declarations).
+
 Example:
 
 ```c
 /**
  * Do something amazing
  *
- * Create a rainbow and place a unicorn at the bottom of it. @p arg1 pots of
- * gold will be positioned on the east end of the rainbow.
+ * Create a rainbow and place a unicorn at the bottom of it. `pots_of_gold`
+ * pots of gold will be positioned on the east end of the rainbow.
+ *
+ * Can be recycled with #recycle_rainbow.
  *
  * @param pots_of_gold Number of gold pots to place next to the rainbow
  * @param unicorns Number of unicorns to position on the rainbow
@@ -130,12 +139,72 @@ Example:
 int create_rainbow(int pots_of_gold, int unicorns);
 ```
 
-## C++ Style Guide
+### Polyglot headers
 
-### C++ Version
+***Headers intended to be included from both languages must contain `extern` guards; `#include`s should not be wrapped in `extern "C" {}`.***
+
+A *polyglot header* is a header file that can be safely included in either a `.c` or `.cc` file.
+In particular, this means that the file must not depend on any of the places where C and C++ semantics disagree.
+For example:
+- `sizeof(struct {})` and `sizeof(true)` are different in C and C++.
+- Function-scope `static` variables generate lock calls in C++.
+- Some libc macros, like `static_assert`, may not be present in C++.
+- Character literals type as `char` in C++ but `int` in C.
+
+Such files must be explictly marked with `extern` guards like the following, starting after the file's `#include`s.
+```
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Declarations...
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
+```
+Moreover, all non-system `#includes` in a polyglot header must also be of other polyglot headers.
+(In other words, all C system headers may be assumed to be polyglot, even if they lack guards.)
+
+Additionally, it is forbidden to wrap `#include` statements in `extern "C"` in a C++ file.
+While this does correctly set the ABI for a header implemented in C, that header may contain code that subtly depends on the peculiarities of C.
+
+This last rule is waived for third-party headers, which may be polyglot but not declared in our style.
+
+## C++ Style Guide {#cxx-style-guide}
+
+### C++ Version {#cxx-version}
 
 C++ code should target C++14.
 
+### Aggregate Initializers
+
+***C++20-style designated initializers are permitted in C++ code, when used with POD types.***
+
+While we target C++14, both GCC and Clang allow C++20 designated initializers in C++14-mode, as an extension:
+```
+struct Foo { int a, b; };
+
+Foo f = { .a = 1, .b = 42, };
+```
+
+This feature is fairly mature in both compilers, though it varies from the C11 variant in two ways important ways:
+  - It can only be used with structs and unions, not arrays.
+  - Members must be initialized in declaration order.
+
+Because it is especially useful with types declared for C, we allow designatued initializers whenever the type is a plain-old-data type, and:
+  - All members are public.
+  - It has no non-trivial constructors.
+  - It has no `virtual` members.
+
+Furthermore, designated initializers do not play well with type deduction and overload resolution.
+As such, they are forbidden in the following contexts:
+- Do not call overloaded functions with a designated initializer: `overloaded({ .foo = 0 })`.
+  Instead, disambiguate with syntax like `T var = { .foo = 0 }; overloaded(var);`.
+- Do not use designated initializers in any place where they would be used for type defuction.
+  This includes `auto`, such as `auto var = { .foo = 0 };`, and a templated argument in a template function.
+
+It is recommended to only use designated initializers with types which use C-style declarations.
 
 ## C Style Guide
 
@@ -143,7 +212,7 @@ The [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html) 
 Consequently, C++-specific rules don't apply.
 In addition to the shared C and C++ style guide rules outlined before, the following C-specific rules apply.
 
-### C Version
+### C Version
 
 ***C code should target C11.***
 
@@ -161,6 +230,34 @@ Any nonstandard features that are used must be compatible with both GCC and Clan
 ***Names of functions, `enum`s, `struct`s, and `typedef`s must be `lower_snake_case`.***
 
 This rule deviates from the Google C++ style guide to align closer with a typical way of writing C code.
+
+***All symbols in a particular header must share the same unique prefix.***
+
+"Prefix" in this case refers to the identifying string of words, and not the specific type/struct/enum/constant/macro-based capitalisation.
+This rule also deviates from the Google C++ style guide, because C does not have namespaces, so we have to use long names to avoid name clashes.
+Symbols that have specific, global meaning imparted by an external script or specification may break this rule.
+For example:
+```c
+// in my_unit.h
+extern const int kMyUnitMaskValue = 0xFF;
+
+typedef enum { kMyUnitReturnOk } my_unit_return_t;
+
+my_unit_return_t my_unit_init(void);
+```
+
+***The names of enumeration constants must be prefixed with the name of their respective enumeration type.***
+
+Again, this is because C does not have namespaces.
+The exact capitalisation does not need to match, as enumeration type names have a different capitalisation rule to enumeration constants.
+For example:
+```c
+typedef enum my_wonderful_option {
+  kMyWonderfulOptionEnabled,
+  kMyWonderfulOptionDisabled,
+  kMyWonderfulOptionOnlySometimes
+} my_wonderful_option_t;
+```
 
 ### Preprocessor Macros
 
@@ -186,6 +283,45 @@ This may change if we find cases where this initialization improves readability.
 When initializing an array, initializers *may* be designated when that makes the array more readable (e.g., lookup tables that are mostly zeroed). Mixing designated and undesignated initializers, or using nested initializers, is still
 forbidden.
 
+### Inline Functions
+
+Functions that we strongly wish to be inlined, and which are part of a public interface, should be declared as an inline function.
+This annotation serves as an indication to the programmer that the function has a low calling overhead, despite being part of a public interface.
+Presence---or lack---of an `inline` annotation does not imply a function will---or will not---be inlined by the compiler.
+
+[C11](#c-version) standardised inline functions, learning from the mistakes in C++ and various nonstandard extensions.
+This means there are many legacy ways to define an inline function in C.
+We have chosen to follow how C11 designed the `inline` keyword.
+
+The function definition is written in a header file, with the keyword `inline`:
+```c
+// in my_inline.h
+inline int my_inline_function(long param1) {
+  // implementation
+}
+```
+
+There should be exactly one compilation unit with a compatible `extern` declaration of the same function:
+```c
+// in my_inline.c
+#include <my_inline.h>
+extern int my_inline_function(long param1);
+```
+
+Any compilation unit that includes `my_inline.h` must be linked to the compilation unit with the extern declarations.
+This ensures that if the compiler chooses not to inline `my_inline_function`, there is a function definition that can be called.
+This also ensures that the function can be used via a function pointer.
+
+### Static Declarations
+
+Declarations marked `static` must not appear in header files.
+Header files are declarations of public interfaces, and `static` definitions are copied, not shared, between compilation units.
+
+This is especially important in the case of a polyglot header, since function-local static declarations have different, incompatible semantics in C and C++.
+
+Functions marked `static` must not be marked `inline`.
+The compiler is capable of inlining static functions without the `inline` annotation.
+
 ### Nonstandard Attributes
 
 The following nonstandard attributes may be used:
@@ -193,6 +329,7 @@ The following nonstandard attributes may be used:
 *   `weak` to make a symbol definition have weak linkage.
 *   `interrupt` to ensure a function has the right prolog and epilog for interrupts (this involves saving and restoring more registers than normal).
 *   `packed` to ensure a struct contains no padding.
+*   `warn_unused_result`, to mark functions that return error values that should be checked.
 
 It is recommended that other nonstandard attributes are not used, especially where C11 provides a standard means to accomplish the same thing.
 
@@ -206,36 +343,29 @@ __attribute__((section(".crt"))) void _crt(void);
 
 ### Nonstandard Compiler Builtins
 
-All nonstandard builtins must be supported by both GCC and Clang.
+In order to avoid a total reliance on one single compiler, any nonstandard compiler builtins (also known as intrinsics) should be used via a single canonical definition.
+This ensures changes to add compatibilty for other compilers are less invasive, as we already have a function to include a full implementation within.
+
+All nonstandard builtins should be supported by both GCC and Clang.
 Compiler builtin usage is complex, and it is recommended that a compiler engineer reviews any code that adds new builtins.
 
-In the following, `__builtin_foo` is the "prefixed" name and `foo` is the corresponding "unprefixed" name.
+In the following, `__builtin_foo` is the *builtin name* and `foo` is the corresponding *general name*.
 
-***The use of nonstandard compiler builtins must have an unprefixed compatible definition.***
+***The use of nonstandard compiler builtins must be hidden using a canonical, compatible definition.***
 
-There are two ways of doing this, depending on what the builtin does.
+There are two ways of providing this canonical definition, depending on what the builtin does.
 
-For builtins that correspond to a C library function, the unprefixed function must be available to the linker, as the compiler may still insert a call to this function.
+For builtins that correspond to a C library function, the general name must be available to the linker, as the compiler may still insert a call to this function.
 Unfortunately, older versions of GCC do not support the `__has_builtin()` preprocessor function, so compiler detection of support for these builtins is next to impossible.
-In this case, a standards-compliant implementation of the unprefixed name must be provided, and the compilation unit should be compiled with `-fno-builtins`.
+In this case, a standards-compliant implementation of the general name must be provided, and the compilation unit should be compiled with `-fno-builtins`.
 
-For builtins that correspond to low-level byte and integer manipulations, an unprefixed inline function must be provided, which contains only a call to the prefixed name.
-Only the unprefixed name may be called by users.
+For builtins that correspond to low-level byte and integer manipulations, an [inline function](#inline-functions) should be provided with a general name, which contains a call to the builtin name itself, or an equivalent implementation.
+Only the general name may be called by users: for instance, `uint32_t __builtin_bswap32(uint32_t)` must not be called, instead users should use `inline uint32_t bswap32(uint32_t x)`.
+Where the general name is already taken by an incompatible host or device library symbol, the general name can be prefixed with the current C namespace prefix, for instance `inline uint32_t bitfield_bswap32(uint32_t x)` for a function in `bitfield.h`.
+Where the general name is a short acronym, the name may be expanded for clarity, for instance `__builtin_ffs` may have a canonical definition named `bitfield_find_first_set`.
+Where there are compatible typedefs that convey additional meaning (e.g. `uint32_t` vs `unsigned int`), these may be written instead of the official builtin types.
 
-The inline function must be defined in a header, and exactly one compilation unit must have a compatible `extern` declaration for that function.
-For instance, `uint32_t __builtin_bswap32(uint32_t)` should not be called, instead the following should be implemented:
-```c
-// in bswap.h (can be included anywhere)
-inline uint32_t bswap32(uint32_t x) {
-  return __builtin_bswap32(x);
-}
-
-// only in bswap.c
-#include "bswap.h"
-extern uint32_t bswap32(uint32_t x);
-```
-
-This ensures changes to add compatibilty for other compilers are less invasive, as we already have a function to include a full implementation within.
+For builtins that cannot be used via a compatible function definition (e.g. if an argument is a type or identifier), there should be a single canonical preprocessor definition with the general name, which expands to the builtin.
 
 ## Code Lint
 

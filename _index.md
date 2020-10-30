@@ -1,4 +1,6 @@
-# Introduction to OpenTitan
+---
+title: "Introduction to OpenTitan"
+---
 
 [OpenTitan](https://opentitan.org) is an open source silicon Root of Trust (RoT) project.
 OpenTitan will make the silicon RoT design and implementation more transparent, trustworthy, and secure for enterprises, platform providers, and chip manufacturers.
@@ -23,21 +25,4 @@ Unless otherwise noted, everything in the repository is covered by the Apache Li
 
 ## Documentation Sections
 
-* [Project]({{< relref "doc/project" >}})
-  * How the OpenTitan project is organized
-  * Progress tracking
-* [User Guides]({{< relref "doc/ug" >}})
-  * How to get started with the repo
-  * How to emulate on an FPGA
-  * How hardware design is done in OpenTitan
-  * How verification is done in OpenTitan
-* [Reference Manuals]({{< relref "doc/rm" >}})
-  * Defining comportable IP peripherals
-  * Coding style guides for Verilog, Python, Hjson, C/C++ and Markdown
-  * OpenTitan tools
-* [Hardware Specifications]({{< relref "hw" >}})
-  * Top-level SoC
-  * Ibex processor core
-  * Comportable IP blocks
-* [Tools]({{< relref "util" >}})
-  * READMEs of OpenTitan tools
+{{% sectionContent type="section" depth="1" %}}

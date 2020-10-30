@@ -14,12 +14,14 @@ module tb;
   `include "dv_macros.svh"
 
   wire clk, rst_n;
+  wire devmode;
 % if is_cip:
 % if has_interrupts:
   wire [NUM_MAX_INTERRUPTS-1:0] interrupts;
 % endif
 % if has_alerts:
-  wire [NUM_MAX_ALERTS-1:0] alerts;
+  prim_alert_pkg::alert_rx_t [NUM_ALERTS-1:0] alert_rx;
+  prim_alert_pkg::alert_tx_t [NUM_ALERTS-1:0] alert_tx;
 % endif
 % endif
 
@@ -30,9 +32,9 @@ module tb;
   pins_if #(NUM_MAX_INTERRUPTS) intr_if(interrupts);
 % endif
 % if has_alerts:
-  pins_if #(NUM_MAX_ALERTS) alerts_if(alerts);
+  alert_esc_if alert_if[NUM_ALERTS](.clk(clk), .rst_n(rst_n));
 % endif
-  pins_if #(1) devmode_if();
+  pins_if #(1) devmode_if(devmode);
   tl_if tl_if(.clk(clk), .rst_n(rst_n));
 % endif
 % for agent in env_agents:
@@ -41,19 +43,37 @@ module tb;
 
   // dut
   ${name} dut (
-    .clk_i                (clk        ),
+    .clk_i                (clk      ),
 % if is_cip:
-    .rst_ni               (rst_n      ),
+    .rst_ni               (rst_n    ),
 
-    .tl_i                 (tl_if.h2d  ),
-    .tl_o                 (tl_if.d2h  )
-
+    .tl_i                 (tl_if.h2d),
+% if has_alerts:
+    .tl_o                 (tl_if.d2h),
+    .alert_rx_i           (alert_rx ),
+    .alert_tx_o           (alert_tx )
 % else:
-    .rst_ni               (rst_n      )
+    .tl_o                 (tl_if.d2h)
+% endif
+% else:
+    .rst_ni               (rst_n    )
 
 % endif
     // TODO: add remaining IOs and hook them
   );
+
+% if is_cip:
+% if has_alerts:
+  for (genvar k = 0; k < NUM_ALERTS; k++) begin : connect_alerts_pins
+    assign alert_rx[k] = alert_if[k].alert_rx;
+    assign alert_if[k].alert_tx = alert_tx[k];
+    initial begin
+      uvm_config_db#(virtual alert_esc_if)::set(null, $sformatf("*.env.m_alert_agent_%0s",
+          LIST_OF_ALERTS[k]), "vif", alert_if[k]);
+    end
+  end
+% endif
+% endif
 
   initial begin
     // drive clk and rst_n from clk_if
@@ -63,12 +83,7 @@ module tb;
 % if has_interrupts:
     uvm_config_db#(intr_vif)::set(null, "*.env", "intr_vif", intr_if);
 % endif
-% if has_alerts:
-    uvm_config_db#(alerts_vif)::set(null, "*.env", "alerts_vif", alerts_if);
-% endif
     uvm_config_db#(devmode_vif)::set(null, "*.env", "devmode_vif", devmode_if);
-    uvm_config_db#(tlul_assert_ctrl_vif)::set(null, "*.env", "tlul_assert_ctrl_vif",
-        dut.tlul_assert_device.tlul_assert_ctrl_if);
     uvm_config_db#(virtual tl_if)::set(null, "*.env.m_tl_agent*", "vif", tl_if);
 % endif
 % for agent in env_agents:

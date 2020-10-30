@@ -1,6 +1,6 @@
-// Copyright 2018 lowRISC contributors.
+// Copyright lowRISC contributors.
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
-// SPDX-License-Indentifier: Apache-2.0
+// SPDX-License-Identifier: Apache-2.0
 //
 // Primitive counter-based input filter, with enable.
 // Configurable number of cycles. Cheaper version of filter for
@@ -12,7 +12,7 @@
 //   new input must be opposite value from stored value for
 //   #Cycles before switching to new value.
 
-module prim_filter_ctr #(parameter Cycles = 4) (
+module prim_filter_ctr #(parameter int unsigned Cycles = 4) (
   input  clk_i,
   input  rst_ni,
   input  enable_i,
@@ -20,8 +20,8 @@ module prim_filter_ctr #(parameter Cycles = 4) (
   output filter_o
 );
 
-  localparam CTR_WIDTH = $clog2(Cycles);
-  localparam [CTR_WIDTH-1:0] CYCLESM1 = Cycles-1;
+  localparam int unsigned CTR_WIDTH = $clog2(Cycles);
+  localparam logic [CTR_WIDTH-1:0] CYCLESM1 = (CTR_WIDTH)'(Cycles-1);
 
   logic [CTR_WIDTH-1:0] diff_ctr_q, diff_ctr_d;
   logic filter_q, stored_value_q, update_stored_value;

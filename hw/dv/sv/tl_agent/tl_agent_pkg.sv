@@ -6,22 +6,28 @@
 package tl_agent_pkg;
   // dep packages
   import uvm_pkg::*;
-  import top_pkg::*;
+  import bus_params_pkg::*;
   import tlul_pkg::*;
   import mem_model_pkg::*;
   import dv_lib_pkg::*;
+  import dv_base_reg_pkg::*;
 
   // macro includes
   `include "uvm_macros.svh"
   `include "dv_macros.svh"
 
-  parameter int AddrWidth   = top_pkg::TL_AW;
-  parameter int DataWidth   = top_pkg::TL_DW;
-  parameter int SizeWidth   = top_pkg::TL_SZW;
-  parameter int MaskWidth   = top_pkg::TL_DBW;
-  parameter int SourceWidth = top_pkg::TL_AIW;
-  parameter int DUserWidth  = top_pkg::TL_DUW;
+  parameter int AddrWidth   = bus_params_pkg::BUS_AW;
+  parameter int DataWidth   = bus_params_pkg::BUS_DW;
+  parameter int SizeWidth   = bus_params_pkg::BUS_SZW;
+  parameter int MaskWidth   = bus_params_pkg::BUS_DBW;
+  parameter int SourceWidth = bus_params_pkg::BUS_AIW;
+  parameter int DUserWidth  = bus_params_pkg::BUS_DUW;
   parameter int OpcodeWidth = 3;
+
+  typedef class tl_seq_item;
+  typedef class tl_agent_cfg;
+  // reuse dv_base_driver as is with the right parameter set
+  typedef dv_base_driver #(tl_seq_item, tl_agent_cfg) tl_base_driver;
 
   // TileLink conformance level
   typedef enum bit [1:0] {
@@ -58,9 +64,9 @@ package tl_agent_pkg;
   `include "tl_host_driver.sv"
   `include "tl_device_driver.sv"
   `include "tl_sequencer.sv"
-  `include "tl_seq_lib.sv"
   `include "tl_monitor.sv"
   `include "tl_agent.sv"
   `include "tl_reg_adapter.sv"
+  `include "tl_seq_list.sv"
 
 endpackage

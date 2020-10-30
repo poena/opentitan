@@ -8,13 +8,13 @@ description: "Pin Multiplexer"
 filesets:
   files_rtl:
     depend:
-      - lowrisc:ip:tlul
-      - lowrisc:prim:all
-    files:
-      - rtl/pinmux_reg_pkg.sv
-      - rtl/pinmux_reg_top.sv
-      - rtl/pinmux.sv
-    file_type: systemVerilogSource
+      - lowrisc:ip:pinmux_reg
+      - lowrisc:ip:pinmux_component
+
+parameters:
+  SYNTHESIS:
+    datatype: bool
+    paramtype: vlogdefine
 
 
 targets:
@@ -22,5 +22,19 @@ targets:
     filesets:
       - files_rtl
     toplevel: pinmux
+
+  lint:
+    <<: *default_target
+    default_tool: verilator
+    parameters:
+      - SYNTHESIS=true
+    tools:
+      ascentlint:
+        ascentlint_options:
+          - "-wait_license"
+      verilator:
+        mode: lint-only
+        verilator_options:
+          - "-Wall"
 
 

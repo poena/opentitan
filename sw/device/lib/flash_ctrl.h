@@ -2,11 +2,19 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 
-#ifndef _F_FLASH_CTRL_H__
-#define _F_FLASH_CTRL_H__
+#ifndef OPENTITAN_SW_DEVICE_LIB_FLASH_CTRL_H_
+#define OPENTITAN_SW_DEVICE_LIB_FLASH_CTRL_H_
 
 #include <stdbool.h>
 #include <stdint.h>
+
+// Flash memory base defines, _SZ are presented in bytes
+#define FLASH_MEM_BASE_ADDR 0x20000000
+#define FLASH_WORDS_PER_PAGE 128
+#define FLASH_WORD_SZ 8
+#define FLASH_PAGE_SZ (FLASH_WORDS_PER_PAGE * FLASH_WORD_SZ)
+#define FLASH_PAGES_PER_BANK 256
+#define FLASH_BANK_SZ (FLASH_PAGES_PER_BANK * FLASH_PAGE_SZ)
 
 /**
  * Flash bank IDs
@@ -14,21 +22,36 @@
 typedef enum bank_index { FLASH_BANK_0 = 0, FLASH_BANK_1 = 1 } bank_index_t;
 
 /**
+ * Flash partitions
+ */
+typedef enum partition_type {
+  kDataPartition = 0,
+  kInfoPartition = 1
+} part_type_t;
+
+/**
  * Memory protection configuration options.
+ * Data partitions and Info partitions are handled differently.
  */
 typedef struct mp_region {
-  /** Which region to program. */
+  /** Which region to program for data partition.
+      Which page to program for info partition.
+   */
   uint32_t num;
   /** Region offset. */
   uint32_t base;
   /** Region config size. */
   uint32_t size;
+  /** Region partition size. */
+  part_type_t part;
   /** Read enable flag. */
   uint32_t rd_en;
   /** Program enable flag. */
   uint32_t prog_en;
   /** Erase enable flag. */
   uint32_t erase_en;
+  /** Scramble / ECC enable flag. */
+  uint32_t scramble_en;
 } mp_region_t;
 
 /**
@@ -42,33 +65,36 @@ void flash_init_block(void);
 int flash_check_empty(void);
 
 /**
- * Erase flash bank |bank_idx|. Blocks until erase is complete.
+ * Erase flash bank `bank_idx`. Blocks until erase is complete.
  *
  * @param idx Flash bank index.
  * @return Non zero on failure.
  */
 int flash_bank_erase(bank_index_t idx);
-int flash_page_erase(uint32_t addr);
+int flash_page_erase(uint32_t addr, part_type_t part);
 
 /**
- * Write |data| at |addr| offset with |size| in 4B words
+ * Write `data` at `addr` offset with `size` in 4B words
  *
  * @param addr Flash address 32bit aligned.
+ * @param part Flash parittion to access.
  * @param data Data to write.
- * @param size Number of 4B words to write from |data| buffer.
+ * @param size Number of 4B words to write from `data` buffer.
  * @return Non zero on failure.
  */
-int flash_write(uint32_t addr, const uint32_t *data, uint32_t size);
+int flash_write(uint32_t addr, part_type_t part, const uint32_t *data,
+                uint32_t size);
 
 /**
- * Read |size| 4B words and write result to |data|.
+ * Read `size` 4B words and write result to `data`.
  *
  * @param addr Read start address.
+ * @param part Flash parittion to access.
  * @param size Number of 4B words to read.
- * @param data Output buffer.
+ * @param[out] data Output buffer.
  * @return Non zero on failure.
  */
-int flash_read(uint32_t addr, uint32_t size, uint32_t *data);
+int flash_read(uint32_t addr, part_type_t part, uint32_t size, uint32_t *data);
 
 /**
  * Configure bank erase enable
@@ -97,4 +123,4 @@ void flash_write_scratch_reg(uint32_t value);
 /** Read scratch register */
 uint32_t flash_read_scratch_reg(void);
 
-#endif  // _F_FLASH_CTRL_H__
+#endif  // OPENTITAN_SW_DEVICE_LIB_FLASH_CTRL_H_

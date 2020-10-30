@@ -2,11 +2,9 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 
-// Get NULL from here
-#include "usb_simpleserial.h"
+#include "sw/device/lib/usb_simpleserial.h"
 
-#include "sw/device/lib/common.h"
-#include "usbdev.h"
+#include "sw/device/lib/usbdev.h"
 
 #define MAX_GATHER 16
 
@@ -70,7 +68,7 @@ void usb_simpleserial_send_byte(usb_ss_ctx_t *ssctx, uint8_t c) {
 
 void usb_simpleserial_init(usb_ss_ctx_t *ssctx, usbdev_ctx_t *ctx, int ep,
                            void (*got_byte)(uint8_t)) {
-  usbdev_endpoint_setup(ctx, ep, 1, ssctx, NULL, ss_rx, ss_flush);
+  usbdev_endpoint_setup(ctx, ep, 1, ssctx, NULL, ss_rx, ss_flush, NULL);
   ssctx->ctx = ctx;
   ssctx->ep = ep;
   ssctx->got_byte = got_byte;

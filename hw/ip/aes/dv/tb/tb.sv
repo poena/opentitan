@@ -14,25 +14,40 @@ module tb;
   `include "dv_macros.svh"
 
   wire clk, rst_n;
+  wire devmode;
   wire [NUM_MAX_INTERRUPTS-1:0] interrupts;
-  wire [NUM_MAX_ALERTS-1:0] alerts;
+  alert_esc_if alert_if[NUM_ALERTS](.clk(clk), .rst_n(rst_n));
+  prim_alert_pkg::alert_rx_t [NUM_ALERTS-1:0] alert_rx;
+  prim_alert_pkg::alert_tx_t [NUM_ALERTS-1:0] alert_tx;
 
   // interfaces
   clk_rst_if clk_rst_if(.clk(clk), .rst_n(rst_n));
   pins_if #(NUM_MAX_INTERRUPTS) intr_if(interrupts);
-  pins_if #(NUM_MAX_ALERTS) alerts_if(alerts);
-  pins_if #(1) devmode_if();
+
+  pins_if #(1) devmode_if(devmode);
   tl_if tl_if(.clk(clk), .rst_n(rst_n));
+
+  for (genvar k = 0; k < NUM_ALERTS; k++) begin : connect_alerts_pins
+    assign alert_rx[k] = alert_if[k].alert_rx;
+    assign alert_if[k].alert_tx = alert_tx[k];
+    initial begin
+      uvm_config_db#(virtual alert_esc_if)::set(null, $sformatf("*.env.m_alert_agent_%0s",
+          LIST_OF_ALERTS[k]), "vif", alert_if[k]);
+    end
+  end
 
   // dut
   aes dut (
     .clk_i                (clk        ),
     .rst_ni               (rst_n      ),
 
-    .tl_i                 (tl_if.h2d  ),
-    .tl_o                 (tl_if.d2h  )
+    .idle_o               (           ),
 
-    // TODO: add remaining IOs and hook them
+    .tl_i                 (tl_if.h2d  ),
+    .tl_o                 (tl_if.d2h  ),
+
+    .alert_rx_i           ( alert_rx  ),
+    .alert_tx_o           ( alert_tx  )
   );
 
   initial begin
@@ -40,11 +55,7 @@ module tb;
     clk_rst_if.set_active();
     uvm_config_db#(virtual clk_rst_if)::set(null, "*.env", "clk_rst_vif", clk_rst_if);
     uvm_config_db#(intr_vif)::set(null, "*.env", "intr_vif", intr_if);
-    uvm_config_db#(alerts_vif)::set(null, "*.env", "alerts_vif", alerts_if);
     uvm_config_db#(devmode_vif)::set(null, "*.env", "devmode_vif", devmode_if);
-//    uvm_config_db#(tlul_assert_vif)::set(null, "*.env", "tlul_assert_vif", tb.dut.tlul_assert);
-    uvm_config_db#(tlul_assert_ctrl_vif)::set(null, "*.env", "tlul_assert_ctrl_vif",
-        dut.tlul_assert_device.tlul_assert_ctrl_if);
     uvm_config_db#(virtual tl_if)::set(null, "*.env.m_tl_agent*", "vif", tl_if);
     $timeformat(-12, 0, " ps", 12);
     run_test();

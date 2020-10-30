@@ -4,6 +4,10 @@
 
 {
     name:               "rv_timer",
+    design_spec:        "hw/ip/rv_timer/doc",
+    dv_plan:            "hw/ip/rv_timer/doc/dv_plan",
+    hw_checklist:       "hw/ip/rv_timer/doc/checklist",
+    sw_checklist:       "sw/device/lib/dif/dif_rv_timer",
     revisions: [
       {
         version:            "0.5",
@@ -18,7 +22,7 @@
         life_stage:         "L1",
         design_stage:       "D2",
         verification_stage: "V2",
-        commit_id:          "f3039d7006ca8ebd45ae0b52b22864983876175d",
+        dif_stage:          "S0",
         notes:              "Rolled back to D2 as the register module is updated",
       }
     ]

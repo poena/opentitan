@@ -4,18 +4,23 @@
 
 #include "sw/host/spiflash/updater.h"
 
-#include <assert.h>
-
 #include <algorithm>
+#include <assert.h>
+#include <unistd.h>
 
 namespace opentitan {
 namespace spiflash {
 namespace {
 
-// Populates frame |f| with |frame_number|, |code_offset|, and frame data
-// starting at |code_offset| from |code| buffer. Calculates SHA256 hash of
-// frame payload and it stores it in the frame header. Returns the number of
-// bytes loaded into the frame.
+/**
+ * Populate target frame `f`.
+ *
+ * Populates frame `f` with `frame_number`, `code_offset`, and frame data
+ * starting at `code_offset` from `code` buffer. Calculates SHA256 hash of
+ * frame payload and it stores it in the frame header.
+ *
+ * @return the number of bytes loaded into the frame.
+ */
 uint32_t Populate(uint32_t frame_number, uint32_t code_offset,
                   const std::string &code, Frame *f) {
   assert(f);
@@ -34,7 +39,9 @@ uint32_t Populate(uint32_t frame_number, uint32_t code_offset,
   return copy_size;
 }
 
-// Calculate hash for frame |f| and store it in the frame header hash field.
+/**
+ * Calculate hash for frame `f` and store it in the frame header hash field.
+ */
 void HashFrame(Frame *f) {
   SHA256_CTX sha256;
   SHA256_Init(&sha256);
@@ -42,15 +49,6 @@ void HashFrame(Frame *f) {
   SHA256_Update(&sha256, &f->hdr.offset, sizeof(f->hdr.offset));
   SHA256_Update(&sha256, f->data, f->PayloadSize());
   SHA256_Final(f->hdr.hash, &sha256);
-}
-
-// Check hash portion of |ack| against |ack_expected|.
-bool CheckAckHash(const std::string &ack, const std::string &ack_expected) {
-  uint8_t result = 0;
-  for (int i = 0; i < 32; ++i) {
-    result |= ack[i] ^ ack_expected[i];
-  }
-  return (result == 0);
 }
 
 }  // namespace
@@ -77,31 +75,22 @@ bool Updater::Run() {
               << std::setw(8) << std::hex << f.hdr.offset << std::endl;
 
     if (!spi_->TransmitFrame(reinterpret_cast<const uint8_t *>(&f),
-                             reinterpret_cast<uint8_t *>(&ack[0]),
                              sizeof(Frame))) {
       std::cerr << "Failed to transmit frame no: 0x" << std::setfill('0')
                 << std::setw(8) << std::hex << f.hdr.frame_num << std::endl;
     }
 
-    // When we send the next frame, we'll get the previous frame's hash as
-    // the ack, so with each increment of |current_frame| we also need to
-    // update the |ack_expected| value.
-    uint32_t ack_expected_index = 0;
-    if (current_frame == 0 || CheckAckHash(ack, ack_expected)) {
-      ack_expected_index = current_frame;
-      current_frame++;
-    } else {
-      // TODO: Improve protocol by encoding NEXT frame number, current error,
-      // ack marker and CRC.
-      // The current implementation will send the previous frame if the current
-      // ack doesn't match the expected response.
-      if (current_frame > 1) {
-        current_frame--;
-      }
-      ack_expected_index = (current_frame == 0) ? 0 : current_frame - 1;
+    // After receiving and validating the first frame, the device is erasing
+    // the Flash.
+    if (current_frame == 0) {
+      usleep(options_.flash_erase_delay_us);
     }
-    SHA256(reinterpret_cast<const uint8_t *>(&frames[ack_expected_index]),
-           sizeof(f), reinterpret_cast<uint8_t *>(&ack_expected[0]));
+
+    // When we send each frame we wait for the correct hash before continuing.
+    if (current_frame == frames.size() - 1 ||
+        spi_->CheckHash(reinterpret_cast<const uint8_t *>(&f), sizeof(Frame))) {
+      current_frame++;
+    }
   }
   return true;
 }

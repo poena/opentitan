@@ -21,6 +21,7 @@ It follows these specifications:
 * `RISC-V Instruction Set Manual, Volume II: Privileged Architecture, document version 20190608-Base-Ratified (June 8, 2019) <https://github.com/riscv/riscv-isa-manual/releases/download/Ratified-IMFDQC-and-Priv-v1.11/riscv-privileged-20190608.pdf>`_.
   Ibex implements the Machine ISA version 1.11.
 * `RISC-V External Debug Support, version 0.13.2 <https://content.riscv.org/wp-content/uploads/2019/03/riscv-debug-release.pdf>`_
+* `RISC-V Bit Manipulation Extension, version 0.92 (draft from November 8, 2019) <https://github.com/riscv/riscv-bitmanip/blob/master/bitmanip-0.92.pdf>`_
 
 Many features in the RISC-V specification are optional, and Ibex can be parametrized to enable or disable some of them.
 
@@ -46,6 +47,10 @@ In addition, the following instruction set extensions are available.
      - 2.0
      - optional
 
+   * - **B**: Draft Extension for Bit Manipulation Instructions
+     - 0.92 [#B_draft]_
+     - optional
+
    * - **Zicsr**: Control and Status Register Instructions
      - 2.0
      - always enabled
@@ -68,13 +73,15 @@ ASIC Synthesis
 ASIC synthesis is supported for Ibex.
 The whole design is completely synchronous and uses positive-edge triggered flip-flops, except for the register file, which can be implemented either with latches or with flip-flops.
 See :ref:`register-file` for more details.
-The core occupies an area of roughly 18.9 kGE when using the latch-based register file and implementing the RV32IMC ISA, or 11.6 kGE when implementing the RV32EC ISA.
+The core occupies an area of roughly 24 kGE when using the latch-based register file and implementing the RV32IMC ISA, or 16 kGE when implementing the RV32EC ISA.
 
 FPGA Synthesis
 --------------
 
-FPGA synthesis is supported for Ibex when the flip-flop based register file is used.
-Since latches are not well supported on FPGAs, it is crucial to select the flip-flop based register file.
+FPGA Synthesis is supported for Ibex.
+The FPGA-optimized register file implementation should be used.
+The flip-flop based register file is also compatible with FPGA synthesis, however it may result in significantly higher resource utilization.
+Since latches are not well supported on FPGAs, the latch-based register file should not be used.
 
 Contents
 --------
@@ -84,6 +91,7 @@ Contents
  * :ref:`pipeline-details` described the overal pipeline structure.
  * :ref:`instruction-decode-execute` describes how the Instruction Decode and Execute stage works.
  * The instruction and data interfaces of Ibex are explained in :ref:`instruction-fetch` and :ref:`load-store-unit`, respectively.
+ * :ref:`icache` describes the optional Instruction Cache.
  * The two register-file flavors are described in :ref:`register-file`.
  * The control and status registers are explained in :ref:`cs-registers`.
  * :ref:`performance-counters` gives an overview of the performance monitors and event counters available in Ibex.
@@ -109,3 +117,10 @@ References
 ----------
 
 1. `Schiavone, Pasquale Davide, et al. "Slow and steady wins the race? A comparison of ultra-low-power RISC-V cores for Internet-of-Things applications." 27th International Symposium on Power and Timing Modeling, Optimization and Simulation (PATMOS 2017) <https://doi.org/10.1109/PATMOS.2017.8106976>`_
+
+.. rubric:: Footnotes
+
+.. [#B_draft] Note that while Ibex fully implements draft version 0.92 of the RISC-V Bit Manipulation Extension, this extension may change before being ratified as a standard by the RISC-V Foundation.
+   Ibex will be updated to match future versions of the specification.
+   Prior to ratification this may involve backwards incompatible changes.
+   Additionally, neither GCC or Clang have committed to maintaining support upstream for unratified versions of the specification.

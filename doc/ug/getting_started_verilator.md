@@ -1,4 +1,6 @@
-# Getting started with Verilator
+---
+title: Getting started with Verilator
+---
 
 ## About Verilator
 
@@ -17,21 +19,23 @@ First the simulation needs to built itself.
 
 ```console
 $ cd $REPO_TOP
-$ fusesoc --cores-root . run --target=sim --setup --build lowrisc:systems:top_earlgrey_verilator
+$ fusesoc --cores-root . run --flag=fileset_top --target=sim --setup --build lowrisc:systems:top_earlgrey_verilator
 ```
+The fsel_top flag used above is specific to the OpenTitan project to select the correct fileset.
+
 
 Then we need to build software to run on the simulated system.
 There are 3 memory types: ROM, RAM and Flash.
 By default, the system will first execute out of ROM and then jump to flash.
 A program needs to be built for each until ROM functionality for code download is ready.
 
-For that purpose compile the demo program with "simulation" settings, which adjusts the frequencies to better match the simulation speed. 
+For that purpose compile the demo program with "simulation" settings, which adjusts the frequencies to better match the simulation speed.
 For more information on building software targets refer to the [Software Getting Started Guide]({{< relref "getting_started_sw.md" >}}).
 
 ```console
 $ cd $REPO_TOP
 $ ./meson_init.sh
-$ ninja -C build-out/sw/device/sim-verilator all
+$ ninja -C build-out all
 ```
 
 Now the simulation can be run.
@@ -40,8 +44,8 @@ The programs listed after `--meminit` are loaded into the system's specified mem
 ```console
 $ cd $REPO_TOP
 $ build/lowrisc_systems_top_earlgrey_verilator_0.1/sim-verilator/Vtop_earlgrey_verilator \
-  --meminit=rom,build-bin/sw/device/sim-verilator/boot_rom/boot_rom.elf \
-  --meminit=flash,build-bin/sw/device/sim-verilator/examples/hello_world/hello_world.elf
+  --meminit=rom,build-bin/sw/device/boot_rom/boot_rom_sim_verilator.elf \
+  --meminit=flash,build-bin/sw/device/examples/hello_world/hello_world_sim_verilator.elf
 ```
 
 To stop the simulation press CTRL-c.
@@ -70,6 +74,38 @@ $ screen /dev/pts/11
 Note that `screen` will only show output that has been generated after `screen` starts, whilst `cat` will show output that was produced before `cat` started.
 
 You can exit `screen` (in the default configuration) by pressing `CTRL-a k` and confirm with `y`.
+
+If everything is working correctly you should expect to see text like
+the following from the virtual UART (replacing `/dev/pts/11` with the reported
+device):
+
+```console
+$ cat /dev/pts/11
+I00000 boot_rom.c:35] Version:    opentitan-snapshot-20191101-1-1182-g2aedf641
+Build Date: 2020-05-13, 15:04:09
+
+I00001 boot_rom.c:44] Boot ROM initialisation has completed, jump into flash!
+I00000 hello_world.c:30] Hello World!
+I00001 hello_world.c:31] Built at: May 13 2020, 15:27:31
+I00002 demos.c:17] Watch the LEDs!
+I00003 hello_world.c:44] Try out the switches on the board
+I00004 hello_world.c:45] or type anything into the console window.
+I00005 hello_world.c:46] The LEDs show the ASCII code of the last character.
+```
+
+Instead of interacting with the UART through a pseudo-terminal, the UART output can be written to a log file, or to STDOUT.
+This is done by passing the `UARTDPI_LOG_uart0` plus argument ("plusarg") to the verilated simulation at runtime.
+To write all UART output to STDOUT, pass `+UARTDPI_LOG_uart0=-` to the simulation.
+To write all UART output to a file called `your-log-file.log`, pass `+UARTDPI_LOG_uart0=your-log-file.log`.
+
+A full command-line invocation of the simulation could then look like that:
+```console
+$ cd $REPO_TOP
+$ build/lowrisc_systems_top_earlgrey_verilator_0.1/sim-verilator/Vtop_earlgrey_verilator \
+  --meminit=rom,build-bin/sw/device/boot_rom/boot_rom_sim_verilator.elf \
+  --meminit=flash,build-bin/sw/device/examples/hello_world/hello_world_sim_verilator.elf \
+  +UARTDPI_LOG_uart0=-
+```
 
 ## Interact with GPIO
 
@@ -104,12 +140,9 @@ $ /tools/openocd/bin/openocd -s util/openocd -f board/lowrisc-earlgrey-verilator
 To connect GDB use the following command (noting it needs to be altered to point to the sw binary in use).
 
 ```console
-$ riscv32-unknown-elf-gdb -ex "target extended-remote :3333" -ex "info reg" sw/device/sim_hello_world/sw.elf
+$ riscv32-unknown-elf-gdb -ex "target extended-remote :3333" -ex "info reg" \
+  build-bin/sw/device/examples/hello_world/hello_world_sim_verilator.elf
 ```
-
-Note that debug support is not yet mature (see https://github.com/lowRISC/opentitan/issues/574).
-In particular GDB cannot set breakpoints as it can't write to the (emulated) flash memory.
-HW breakpoint support is planned for Ibex to allow breakpointing code in flash.
 
 You can also run the debug compliance test suite built into OpenOCD.
 
@@ -120,7 +153,7 @@ $ /tools/openocd/bin/openocd -s util/openocd -f board/lowrisc-earlgrey-verilator
 
 ## SPI device test interface
 
-The simulation contains code to monitor the SPI bus and provide a master interface to allow interaction with the `spi_device`.
+The simulation contains code to monitor the SPI bus and provide a host interface to allow interaction with the `spi_device`.
 When starting the simulation you should see a message like
 
 ```console
@@ -165,8 +198,8 @@ Tracing slows down the simulation by roughly factor of 1000.
 ```console
 $ cd $REPO_TOP
 $ build/lowrisc_systems_top_earlgrey_verilator_0.1/sim-verilator/Vtop_earlgrey_verilator \
-  --meminit=rom,sw/device/sim_boot_rom/rom.elf \
-  --meminit=flash,sw/device/sim_hello_world/sw.elf \
+  --meminit=rom,build-bin/sw/device/boot_rom/boot_rom_sim_verilator.elf \
+  --meminit=flash,build-bin/sw/device/examples/hello_world/hello_world_sim_verilator.elf \
   --trace
 $ gtkwave sim.fst
 ```

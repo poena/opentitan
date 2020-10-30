@@ -1,4 +1,6 @@
-# Work with hardware code in external repositories
+---
+title: Work with hardware code in external repositories
+---
 
 OpenTitan is not a closed ecosystem: we incorporate code from third parties, and we split out pieces of our code to reach a wider audience.
 In both cases, we need to import and use code from external repositories in our OpenTitan code base.
@@ -18,7 +20,7 @@ In particular, this means:
    They might differ from our own rules.
 - Use the upstream mechanisms to do code changes. In many cases, upstream uses GitHub just like we do with Pull Requests.
 - Work with upstream reviewers to get your changes merged into their code base.
-- Once the change is part of the upstream repository, the `vendor_hw` tool can be used to copy the upstream code back into our OpenTitan repository.
+- Once the change is part of the upstream repository, the `util/vendor` tool can be used to copy the upstream code back into our OpenTitan repository.
 
 Read on for the longer version of these guidelines.
 
@@ -46,7 +48,7 @@ By explicitly importing code we also ensure that no unreviewed code sneaks into 
 
 But what happens if the imported code needs to be modified?
 Ideally, all code changes are submitted upstream, integrated into the upstream code base, and then re-imported into our code base.
-This development methodology is called "upstream first". 
+This development methodology is called "upstream first".
 History has shown repeatedly that an upstream first policy can help significantly with the long-term maintenance of code.
 
 However, strictly following an upstream first policy isn't great either.
@@ -64,8 +66,8 @@ This section gives a quick overview how we include code from other repositories 
 
 All imported ("vendored") hardware code is by convention put into the `hw/vendor` directory.
 (We have more conventions for file and directory names which are discussed below when the import of new code is described.)
-To interact with code in this directory a tool called `vendor_hw` is used, which can be found in `util/vendor_hw.py`.
-A "vendor description file" controls the vendoring process and serves as input to the `vendor_hw` tool.
+To interact with code in this directory a tool called `util/vendor.py` is used.
+A "vendor description file" controls the vendoring process and serves as input to the `util/vendor` tool.
 
 In the simple, yet typical, case, the vendor description file is only a couple of lines of human-readable JSON:
 
@@ -84,13 +86,13 @@ $ cat hw/vendor/lowrisc_ibex.vendor.hjson
 
 This description file essentially says:
 We vendor a component called "lowrisc_ibex" and place the code into the "lowrisc_ibex" directory (relative to the description file).
-The code comes from the master branch of the Git repository found at https://github.com/lowRISC/ibex.git.
+The code comes from the `master` branch of the Git repository found at https://github.com/lowRISC/ibex.git.
 
-With this description file written, the `vendor_hw` tool can do its job.
+With this description file written, the `util/vendor` tool can do its job.
 
 ```command
 $ cd $REPO_TOP
-$ ./util/vendor_hw.py hw/vendor/lowrisc_ibex.vendor.hjson --verbose
+$ ./util/vendor.py hw/vendor/lowrisc_ibex.vendor.hjson --verbose --update
 INFO: Cloning upstream repository https://github.com/lowRISC/ibex.git @ master
 INFO: Cloned at revision 7728b7b6f2318fb4078945570a55af31ee77537a
 INFO: Copying upstream sources to /home/philipp/src/opentitan/hw/vendor/lowrisc_ibex
@@ -100,7 +102,7 @@ INFO: Wrote lock file /home/philipp/src/opentitan/hw/vendor/lowrisc_ibex.lock.hj
 INFO: Import finished
 ```
 
-Looking at the output, you might wonder: how did the `vendor_hw` tool know what changed since the last import?
+Looking at the output, you might wonder: how did the `util/vendor` tool know what changed since the last import?
 It knows because it records the commit hash of the last import in a file called the "lock file".
 This file can be found along the `.vendor.hjson` file, it's named `.lock.hjson`.
 
@@ -118,8 +120,9 @@ $ cat hw/vendor/lowrisc_ibex.lock.hjson
 ```
 
 The lock file should be committed together with the code itself to make the import step reproducible at any time.
+This import step can be reproduced by running the `util/vendor` tool without the `--update` flag.
 
-After running `vendor_hw`, the code in your local working copy is updated to the latest upstream version.
+After running `util/vendor`, the code in your local working copy is updated to the latest upstream version.
 Next is testing: run simulations, syntheses, or other tests to ensure that the new code works as expected.
 Once you're confident that the new code is good to be committed, do so using the normal Git commands.
 
@@ -136,11 +139,12 @@ $ # Now commit everything. Don't forget to write a useful commit message!
 $ git commit
 ```
 
-Instead of running `vendor_hw` first, and then manually creating a Git commit, you can also use the `--commit` flag.
+Instead of running `util/vendor` first, and then manually creating a Git commit, you can also use the `--commit` flag.
 
 ```command
 $ cd $REPO_TOP
-$ ./util/vendor_hw.py hw/vendor/lowrisc_ibex.vendor.hjson --verbose --commit
+$ ./util/vendor.py hw/vendor/lowrisc_ibex.vendor.hjson \
+    --verbose --update --commit
 ```
 
 This command updates the "lowrisc_ibex" code, and creates a Git commit from it.
@@ -158,7 +162,8 @@ $ git stash
 $ # Create a new branch for the pull request
 $ git checkout -b update-ibex-code upstream/master
 $ # Update lowrisc_ibex and create a commit
-$ ./util/vendor_hw.py hw/vendor/lowrisc_ibex.vendor.hjson --verbose --commit
+$ ./util/vendor.py hw/vendor/lowrisc_ibex.vendor.hjson \
+    --verbose --update --commit
 $ # Push the new branch to your fork
 $ git push origin update-ibex-code
 $ # Restore changes in working directory (if anything was stashed before)
@@ -239,11 +244,11 @@ In many cases their workflow is similar to ours: push your changes to a reposito
 
 ### Step 4: Update the vendored copy of the external dependency
 
-After your change is accepted upstream, you can update our copy of the code using the `vendor_hw` tool as described before.
+After your change is accepted upstream, you can update our copy of the code using the `util/vendor` tool as described before.
 
 ## How to vendor new code
 
-Vendoring external code is done by creating a vendor description file, and then running the `vendor_hw` tool.
+Vendoring external code is done by creating a vendor description file, and then running the `util/vendor` tool.
 
 1. Create a vendor description file for the new dependency.
    1. Make note of the Git repository and the branch you want to vendor in.
@@ -282,11 +287,11 @@ Vendoring external code is done by creating a vendor description file, and then 
    $ git commit
    ```
 
-4. Run the `vendor_hw` tool for the newly vendored code.
+4. Run the `util/vendor` tool for the newly vendored code.
 
    ```command
    $ cd $REPO_TOP
-   $ ./util/vendor_hw.py hw/vendor/lowrisc_ibex.vendor.hjson --verbose --commit
+   $ ./util/vendor.py hw/vendor/lowrisc_ibex.vendor.hjson --verbose --commit
    ```
 
 5. Push the branch to your fork for review (assuming `origin` is the remote name of your fork).
@@ -308,7 +313,7 @@ Example:
 // section of a .vendor.hjson file
 exclude_from_upstream: [
   // exclude all *.h files in the src directory
-  "src/*.h*",
+  "src/*.h",
   // exclude the src_files.yml file
   "src_files.yml",
   // exclude some_directory and all files below it
@@ -316,10 +321,13 @@ exclude_from_upstream: [
 ]
 ```
 
+If you want to add more files to `exclude_from_upstream`, just update this section of the `.vendor.hjson` file and re-run the vendor tool without `--update`.
+The repository will be re-cloned without pulling in upstream updates, and the file exclusions and patches specified in the vendor file will be applied.
+
 ## How to add patches on top of the imported code
 
 In some cases the upstream code must be modified before it can be used.
-For this purpose, the `vendor_hw` tool can apply patches on top of imported code.
+For this purpose, the `util/vendor` tool can apply patches on top of imported code.
 The patches are kept as separate files in our repository, making it easy to understand the differences to the upstream code, and to switch the upstream code to a newer version.
 
 To apply patches on top of vendored code, do the following:
@@ -333,13 +341,15 @@ To apply patches on top of vendored code, do the following:
 
 2. Place patch files with a `.patch` suffix in the `patch_dir`.
 
-3. When running `vendor_hw`, patches are applied on top of the imported code according to the following rules.
+3. When running `util/vendor`, patches are applied on top of the imported code according to the following rules.
 
    - Patches are applied alphabetical order according to the filename.
      Name patches like `0001-do-someting.patch` to apply them in a deterministic order.
    - Patches are applied relative to the base directory of the imported code.
    - The first directory component of the filename in a patch is stripped, i.e. they are applied with the `-p1` argument of `patch`.
    - Patches are applied with `git apply`, making all extended features of Git patches available (e.g. renames).
+
+If you want to add more patches and re-apply them without updating the upstream repository, add them to the patches directory and re-run the vendor tool without `--update`.
 
 ## How to manage patches in a Git repository
 
@@ -354,9 +364,9 @@ The idea:
 - Create a forked Git repository of the upstream code
 - Create a new branch in this fork.
 - Commit all your changes on top of the upstream code into this branch.
-- Convert all commits into patch files and store them where the `vendor_hw` tool can find and apply them.
+- Convert all commits into patch files and store them where the `util/vendor` tool can find and apply them.
 
-The last step is automated by the `vendor_hw` tool through its `--refresh-patches` argument.
+The last step is automated by the `util/vendor` tool through its `--refresh-patches` argument.
 
 1. Modify the vendor description file to add a `patch_repo` section.
    - The `url` parameter specifies the URL to the fork of the upstream repository containing all modifications.
@@ -379,10 +389,10 @@ The last step is automated by the `vendor_hw` tool through its `--refresh-patche
    git push REMOTE_NAME_FORK master changes
    ```
 
-3. Run the `vendor_hw` tool with the `--refresh-patches` argument.
+3. Run the `util/vendor` tool with the `--refresh-patches` argument.
    It will first check out the patch repository and convert all commits which are in the `rev_patched` branch and not in the `rev_base` branch into patch files.
    These patch files are then stored in the patch directory.
-   After that, the vendoring process continues as usual: all patches are applied and if instructed by the `--commit` flag, a commit is created.
+   After that, the vendoring process continues as usual: changes from the upstream repository are downloaded if `--update` passed, all patches are applied, and if instructed by the `--commit` flag, a commit is created.
    This commit now also includes the updated patch files.
 
 To update the patches you can use all the usual Git tools in the forked repository.

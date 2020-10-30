@@ -5,6 +5,8 @@
 // Protocol checker for TL-UL ports using assertions. Supports interface-widths
 // up to 64bit.
 
+`include "prim_assert.sv"
+
 module tlul_assert #(
   parameter EndpointType = "Device" // can be either "Host" or "Device"
 ) (
@@ -17,7 +19,11 @@ module tlul_assert #(
 );
 
 `ifndef VERILATOR
+`ifndef SYNTHESIS
 
+`ifdef UVM
+  import uvm_pkg::*;
+`endif
   import tlul_pkg::*;
   import top_pkg::*;
 
@@ -40,13 +46,7 @@ module tlul_assert #(
 
   pend_req_t [2**TL_AIW-1:0] pend_req;
 
-  // this interfaces allows the testbench to disable some assertions
-  // by driving the corresponding pin to 1'b0
-  wire tlul_assert_ctrl, disable_sva;
-  pins_if #(1) tlul_assert_ctrl_if(tlul_assert_ctrl);
-  // the interface may be uninitialized, in which case the assertions
-  // shall be enabled, hence the explicit check for 1'b0
-  assign disable_sva = (tlul_assert_ctrl === 1'b0);
+  bit disable_sva;
 
   logic [7:0]  a_mask, d_mask;
   logic [63:0] a_data, d_data;
@@ -62,24 +62,24 @@ module tlul_assert #(
   // use negedge clk to avoid possible race conditions
   always_ff @(negedge clk_i or negedge rst_ni) begin
     if (!rst_ni) begin
-      pend_req = '0;
+      pend_req <= '0;
     end else begin
       if (h2d.a_valid) begin
         // store each request in pend_req array (we use blocking statements below so
         // that we can handle the case where request and response for the same
         // source-ID happen in the same cycle)
         if (d2h.a_ready) begin
-          pend_req[h2d.a_source].pend    = 1;
-          pend_req[h2d.a_source].opcode  =  h2d.a_opcode;
-          pend_req[h2d.a_source].size    =  h2d.a_size;
-          pend_req[h2d.a_source].mask    =  h2d.a_mask;
+          pend_req[h2d.a_source].pend    <= 1;
+          pend_req[h2d.a_source].opcode  <= h2d.a_opcode;
+          pend_req[h2d.a_source].size    <= h2d.a_size;
+          pend_req[h2d.a_source].mask    <= h2d.a_mask;
         end
       end // h2d.a_valid
 
       if (d2h.d_valid) begin
         // update pend_req array
         if (h2d.d_ready) begin
-          pend_req[d2h.d_source].pend = 0;
+          pend_req[d2h.d_source].pend <= 0;
         end
       end //d2h.d_valid
     end
@@ -269,16 +269,115 @@ module tlul_assert #(
 
   // a_* should be known when a_valid == 1 (a_opcode and a_param are already covered above)
   // This also covers ASSERT_KNOWN of a_valid
-  `ASSERT_VALID_DATA(aKnown_A, h2d.a_valid, {h2d.a_size, h2d.a_source, h2d.a_address,
-      h2d.a_mask, h2d.a_user}, clk_i, !rst_ni)
+  `ASSERT_KNOWN_IF(aKnown_A, {h2d.a_size, h2d.a_source, h2d.a_address, h2d.a_mask, h2d.a_user},
+    h2d.a_valid)
 
   // d_* should be known when d_valid == 1 (d_opcode, d_param, d_size already covered above)
   // This also covers ASSERT_KNOWN of d_valid
-  `ASSERT_VALID_DATA(dKnown_A, d2h.d_valid, {d2h.d_source, d2h.d_sink, d2h.d_error, d2h.d_user},
-      clk_i, !rst_ni)
+  `ASSERT_KNOWN_IF(dKnown_A, {d2h.d_source, d2h.d_sink, d2h.d_error, d2h.d_user}, d2h.d_valid)
 
   //  make sure ready is not X after reset
-  `ASSERT_KNOWN(aReadyKnown_A, d2h.a_ready, clk_i, !rst_ni)
-  `ASSERT_KNOWN(dReadyKnown_A, h2d.d_ready, clk_i, !rst_ni)
+  `ASSERT_KNOWN(aReadyKnown_A, d2h.a_ready)
+  `ASSERT_KNOWN(dReadyKnown_A, h2d.d_ready)
+
+  ////////////////////////////////////
+  // SVA coverage //
+  ////////////////////////////////////
+  `define TLUL_COVER(SEQ) `COVER(``SEQ``_C, ``SEQ``_S, !clk_i, !rst_ni || disable_sva)
+
+  // host sends back2back requests
+  sequence b2bReq_S;
+    h2d.a_valid && d2h.a_ready ##1 h2d.a_valid;
+  endsequence
+
+  // device sends back2back responses
+  sequence b2bRsp_S;
+    d2h.d_valid && h2d.d_ready ##1 d2h.d_valid;
+  endsequence
+
+  // host sends back2back requests with same address
+  // UVM RAL can't issue this scenario, add this cover to make sure it's tested in some other seq
+  sequence b2bReqWithSameAddr_S;
+    bit [top_pkg::TL_AW-1:0] pre_addr;
+    (h2d.a_valid && d2h.a_ready, pre_addr = h2d.a_address)
+        ##1 h2d.a_valid && pre_addr == h2d.a_address;
+  endsequence
+
+  // a_valid is dropped without a_ready
+  sequence aValidNotAccepted_S;
+    h2d.a_valid && !d2h.a_ready ##1 !h2d.a_valid;
+  endsequence
+
+  // d_valid is dropped without a_ready
+  sequence dValidNotAccepted_S;
+    d2h.d_valid && !h2d.d_ready ##1 !d2h.d_valid;
+  endsequence
+
+  // host uses same source for back2back items
+  sequence b2bSameSource_S;
+    bit [top_pkg::TL_AIW-1:0] pre_source;
+    (h2d.a_valid && d2h.a_ready, pre_source = h2d.a_source) ##1 h2d.a_valid[->1]
+        ##0 pre_source == h2d.a_source;
+  endsequence
+
+  // a channal content is changed without being accepted
+  `define TLUL_A_CHAN_CONTENT_CHANGED_WO_ACCEPTED(NAME) \
+    sequence a_``NAME``ChangedNotAccepted_S; \
+      int pre; \
+      (h2d.a_valid && !d2h.a_ready, pre = h2d.a_``NAME``) ##1 h2d.a_valid[->1] \
+          ##0 pre != h2d.a_``NAME``; \
+    endsequence \
+    `TLUL_COVER(a_``NAME``ChangedNotAccepted)
+
+  // d channal content is changed without being accepted
+  `define TLUL_D_CHAN_CONTENT_CHANGED_WO_ACCEPTED(NAME) \
+    sequence d_``NAME``ChangedNotAccepted_S; \
+      int pre; \
+      (d2h.d_valid && !h2d.d_ready, pre = d2h.d_``NAME``) ##1 d2h.d_valid[->1] \
+          ##0 pre != d2h.d_``NAME``; \
+    endsequence \
+    `TLUL_COVER(d_``NAME``ChangedNotAccepted)
+
+  if (EndpointType == "Host") begin : gen_host_cov // DUT is host
+    `TLUL_COVER(b2bRsp)
+    `TLUL_COVER(dValidNotAccepted)
+    `TLUL_D_CHAN_CONTENT_CHANGED_WO_ACCEPTED(data)
+    `TLUL_D_CHAN_CONTENT_CHANGED_WO_ACCEPTED(opcode)
+    `TLUL_D_CHAN_CONTENT_CHANGED_WO_ACCEPTED(size)
+    `TLUL_D_CHAN_CONTENT_CHANGED_WO_ACCEPTED(source)
+    `TLUL_D_CHAN_CONTENT_CHANGED_WO_ACCEPTED(sink)
+    `TLUL_D_CHAN_CONTENT_CHANGED_WO_ACCEPTED(error)
+  end else if (EndpointType == "Device") begin : gen_device_cov // DUT is device
+    `TLUL_COVER(b2bReq)
+    `TLUL_COVER(b2bReqWithSameAddr)
+    `TLUL_COVER(aValidNotAccepted)
+    `TLUL_COVER(b2bSameSource)
+    `TLUL_A_CHAN_CONTENT_CHANGED_WO_ACCEPTED(address)
+    `TLUL_A_CHAN_CONTENT_CHANGED_WO_ACCEPTED(data)
+    `TLUL_A_CHAN_CONTENT_CHANGED_WO_ACCEPTED(opcode)
+    `TLUL_A_CHAN_CONTENT_CHANGED_WO_ACCEPTED(size)
+    `TLUL_A_CHAN_CONTENT_CHANGED_WO_ACCEPTED(source)
+    `TLUL_A_CHAN_CONTENT_CHANGED_WO_ACCEPTED(mask)
+  end else begin : gen_unknown_cov
+    initial begin : p_unknonw_cov
+      `ASSERT_I(unknownConfig_A, 0 == 1)
+    end
+  end
+
+  `ifdef UVM
+    initial forever begin
+      bit tlul_assert_en;
+      uvm_config_db#(bit)::wait_modified(null, "%m", "tlul_assert_en");
+      if (!uvm_config_db#(bit)::get(null, "%m", "tlul_assert_en", tlul_assert_en)) begin
+        `uvm_fatal("tlul_assert", "Can't find tlul_assert_en")
+      end
+      disable_sva = !tlul_assert_en;
+    end
+  `endif
+
+  `undef TLUL_COVER
+  `undef TLUL_A_CHAN_CONTENT_CHANGED_WO_ACCEPTED
+  `undef TLUL_D_CHAN_CONTENT_CHANGED_WO_ACCEPTED
+`endif
 `endif
 endmodule : tlul_assert

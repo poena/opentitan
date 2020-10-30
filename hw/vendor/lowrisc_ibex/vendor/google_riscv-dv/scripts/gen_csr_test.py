@@ -32,12 +32,13 @@ import yaml
 import argparse
 import random
 import copy
+from lib import *
 
 try:
   from bitstring import BitArray as bitarray
 except ImportError as e:
   logging.error("Please install bitstring package: sudo apt-get install python3-bitstring")
-  sys.exit(1)
+  sys.exit(RET_FAIL)
 
 """
 Defines the test's success/failure values, one of which will be written to
@@ -108,9 +109,9 @@ def get_rs1_val(iteration, xlen):
       3) A randomly generated number
   """
   if iteration == 0:
-    return bitarray(hex=f"0x{'a5'*int(xlen/8)}")
+    return bitarray(hex="0x{}".format('a5'*int(xlen/8)))
   elif iteration == 1:
-    return bitarray(hex=f"0x{'5a'*int(xlen/8)}")
+    return bitarray(hex="0x{}".format('5a'*int(xlen/8)))
   elif iteration == 2:
     val = bitarray(uint=0, length=xlen)
     # Must randomize all 32 bits, due to randomization library limitations
@@ -176,28 +177,23 @@ def predict_csr_val(csr_op, rs1_val, csr_val, csr_write_mask, csr_read_mask):
   prediction = None
   # create a zero bitarray to zero extend immediates
   zero = bitarray(uint=0, length=csr_val.len - 5)
+  prediction = csr_read(csr_val, csr_read_mask)
   if csr_op == 'csrrw':
-    prediction = csr_read(csr_val, csr_read_mask)
     csr_write(rs1_val, csr_val, csr_write_mask)
   elif csr_op == 'csrrs':
-    prediction = csr_read(csr_val, csr_read_mask)
     csr_write(rs1_val | prediction, csr_val, csr_write_mask)
   elif csr_op == 'csrrc':
-    prediction = csr_read(csr_val, csr_read_mask)
     csr_write((~rs1_val) & prediction, csr_val, csr_write_mask)
   elif csr_op == 'csrrwi':
-    prediction = csr_read(csr_val, csr_read_mask)
     zero.append(rs1_val[-5:])
     csr_write(zero, csr_val, csr_write_mask)
   elif csr_op == 'csrrsi':
-    prediction = csr_read(csr_val, csr_read_mask)
     zero.append(rs1_val[-5:])
     csr_write(zero | prediction, csr_val, csr_write_mask)
   elif csr_op == 'csrrci':
-    prediction = csr_read(csr_val, csr_read_mask)
     zero.append(rs1_val[-5:])
     csr_write((~zero) & prediction, csr_val, csr_write_mask)
-  return f"0x{prediction.hex}"
+  return "0x{}".format(prediction.hex)
 
 
 def gen_setup(test_file):
@@ -207,12 +203,12 @@ def gen_setup(test_file):
   Args:
     test_file: the file containing the generated assembly code.
   """
-  test_file.write(f".macro init\n")
-  test_file.write(f".endm\n")
-  test_file.write(f".section .text.init\n")
-  test_file.write(f".globl _start\n")
-  test_file.write(f".option norvc\n")
-  test_file.write(f"_start:\n")
+  test_file.write(".macro init\n")
+  test_file.write(".endm\n")
+  test_file.write(".section .text.init\n")
+  test_file.write(".globl _start\n")
+  test_file.write(".option norvc\n")
+  test_file.write("_start:\n")
 
 
 def gen_csr_test_fail(test_file, end_addr):
@@ -225,13 +221,13 @@ def gen_csr_test_fail(test_file, end_addr):
     test_file: the file containing the generated assembly test code.
     end_addr: address that should be written to at end of test
   """
-  test_file.write(f"csr_fail:\n")
-  test_file.write(f"\tli x1, {TEST_FAIL}\n")
-  test_file.write(f"\tslli x1, x1, 8\n")
-  test_file.write(f"\taddi x1, x1, {TEST_RESULT}\n")
-  test_file.write(f"\tli x2, {end_addr}\n")
-  test_file.write(f"\tsw x1, 0(x2)\n")
-  test_file.write(f"\tj csr_fail\n")
+  test_file.write("csr_fail:\n")
+  test_file.write("\tli x1, {}\n".format(TEST_FAIL))
+  test_file.write("\tslli x1, x1, 8\n")
+  test_file.write("\taddi x1, x1, {}\n".format(TEST_RESULT))
+  test_file.write("\tli x2, 0x{}\n".format(end_addr))
+  test_file.write("\tsw x1, 0(x2)\n")
+  test_file.write("\tj csr_fail\n")
 
 
 def gen_csr_test_pass(test_file, end_addr):
@@ -244,13 +240,13 @@ def gen_csr_test_pass(test_file, end_addr):
     test_file: the file containing the generated assembly test code.
     end_addr: address that should be written to at end of test
   """
-  test_file.write(f"csr_pass:\n")
-  test_file.write(f"\tli x1, {TEST_PASS}\n")
-  test_file.write(f"\tslli x1, x1, 8\n")
-  test_file.write(f"\taddi x1, x1, {TEST_RESULT}\n")
-  test_file.write(f"\tli x2, {end_addr}\n")
-  test_file.write(f"\tsw x1, 0(x2)\n")
-  test_file.write(f"\tj csr_pass\n")
+  test_file.write("csr_pass:\n")
+  test_file.write("\tli x1, {}\n".format(TEST_PASS))
+  test_file.write("\tslli x1, x1, 8\n")
+  test_file.write("\taddi x1, x1, {}\n".format(TEST_RESULT))
+  test_file.write("\tli x2, 0x{}\n".format(end_addr))
+  test_file.write("\tsw x1, 0(x2)\n")
+  test_file.write("\tj csr_pass\n")
 
 
 def gen_csr_instr(original_csr_map, csr_instructions, xlen,
@@ -275,13 +271,13 @@ def gen_csr_instr(original_csr_map, csr_instructions, xlen,
     # pick two GPRs at random to act as source and destination registers
     # for CSR operations
     csr_map = copy.deepcopy(original_csr_map)
-    source_reg, dest_reg = [f"x{i}" for i in random.sample(range(1, 16), 2)]
+    source_reg, dest_reg = ["x{}".format(i) for i in random.sample(range(1, 16), 2)]
     csr_list = list(csr_map.keys())
-    with open(f"{out}/riscv_csr_test_{i}.S", "w") as csr_test_file:
+    with open("{}/riscv_csr_test_{}.S".format(out, i), "w") as csr_test_file:
       gen_setup(csr_test_file)
       for csr in csr_list:
         csr_address, csr_val, csr_write_mask, csr_read_mask = csr_map.get(csr)
-        csr_test_file.write(f"\t# {csr}\n")
+        csr_test_file.write("\t# {}\n".format(csr))
         for op in csr_instructions:
           for i in range(3):
             # hex string
@@ -290,17 +286,17 @@ def gen_csr_instr(original_csr_map, csr_instructions, xlen,
             first_li = ""
             if op[-1] == "i":
               imm = rand_rs1_val[-5:]
-              csr_inst = f"\t{op} {dest_reg}, {csr_address}, 0b{imm.bin}\n"
+              csr_inst = "\t{} {}, {}, 0b{}\n".format(op, dest_reg, csr_address, imm.bin)
               imm_val = bitarray(uint=0, length=xlen-5)
               imm_val.append(imm)
-              predict_li = (f"\tli {source_reg}, "
-                f"{predict_csr_val(op, imm_val, csr_val, csr_write_mask, csr_read_mask)}\n")
+              predict_li = ("\tli {}, "
+                "{}\n".format(source_reg, predict_csr_val(op, imm_val, csr_val, csr_write_mask, csr_read_mask)))
             else:
-              first_li = f"\tli {source_reg}, 0x{rand_rs1_val.hex}\n"
-              csr_inst = f"\t{op} {dest_reg}, {csr_address}, {source_reg}\n"
-              predict_li = (f"\tli {source_reg}, "
-                f"{predict_csr_val(op, rand_rs1_val, csr_val, csr_write_mask, csr_read_mask)}\n")
-            branch_check = f"\tbne {source_reg}, {dest_reg}, csr_fail\n"
+              first_li = "\tli {}, 0x{}\n".format(source_reg, rand_rs1_val.hex)
+              csr_inst = "\t{} {}, {}, {}\n".format(op, dest_reg, csr_address, source_reg)
+              predict_li = ("\tli {}, "
+                "{}\n".format(source_reg, predict_csr_val(op, rand_rs1_val, csr_val, csr_write_mask, csr_read_mask)))
+            branch_check = "\tbne {}, {}, csr_fail\n".format(source_reg, dest_reg)
             csr_test_file.write(first_li)
             csr_test_file.write(csr_inst)
             csr_test_file.write(predict_li)
@@ -310,11 +306,11 @@ def gen_csr_instr(original_csr_map, csr_instructions, xlen,
             been written to the CSR has not been tested.
             """
             if csr == csr_list[-1] and op == csr_instructions[-1] and i == 2:
-              final_csr_read = f"\tcsrr {dest_reg}, {csr_address}\n"
+              final_csr_read = "\tcsrr {}, {}\n".format(dest_reg, csr_address)
               csrrs_read_mask = bitarray(uint=0, length=xlen)
-              final_li = (f"\tli {source_reg}, "
-                f"{predict_csr_val('csrrs', csrrs_read_mask, csr_val, csr_write_mask, csr_read_mask)}\n")
-              final_branch_check = f"\tbne {source_reg}, {dest_reg}, csr_fail\n"
+              final_li = ("\tli {}, "
+                "{}\n".format(source_reg, predict_csr_val('csrrs', csrrs_read_mask, csr_val, csr_write_mask, csr_read_mask)))
+              final_branch_check = "\tbne {}, {}, csr_fail\n".format(source_reg, dest_reg)
               csr_test_file.write(final_csr_read)
               csr_test_file.write(final_li)
               csr_test_file.write(final_branch_check)
@@ -322,28 +318,42 @@ def gen_csr_instr(original_csr_map, csr_instructions, xlen,
       gen_csr_test_fail(csr_test_file, end_signature_addr)
 
 
-"""
-Define command line arguments.
-"""
-parser = argparse.ArgumentParser()
-parser.add_argument("--csr_file", type=str, default="yaml/csr_template.yaml",
-        help="The YAML file contating descriptions of all processor supported CSRs")
-parser.add_argument("--xlen", type=int, default=32,
-        help="Specify the ISA width, e.g. 32 or 64 or 128")
-parser.add_argument("--iterations", type=int, default=1,
-        help="Specify how many tests to be generated")
-parser.add_argument("--out", type=str, default="./",
-        help="Specify output directory")
-parser.add_argument("--end_signature_addr", type=str, default="0",
-        help="Address that should be written to at end of this test")
-args = parser.parse_args()
+def main():
+  """Main entry point of CSR test generation script.
+     Will set up a list of all supported CSR instructions,
+     and seed the RNG."""
+
+  # define command line arguments
+  parser = argparse.ArgumentParser()
+  parser.add_argument("--csr_file", type=str, default="yaml/csr_template.yaml",
+          help="The YAML file contating descriptions of all processor supported CSRs")
+  parser.add_argument("--xlen", type=int, default=32,
+          help="Specify the ISA width, e.g. 32 or 64 or 128")
+  parser.add_argument("--iterations", type=int, default=1,
+          help="Specify how many tests to be generated")
+  parser.add_argument("--out", type=str, default="./",
+          help="Specify output directory")
+  parser.add_argument("--end_signature_addr", type=str, default="0",
+          help="Address that should be written to at end of this test")
+  parser.add_argument("--seed", type=int, default=None,
+          help="""Value used to seed the random number generator. If no value is passed in,
+                  the RNG will be seeded from an internal source of randomness.""")
+  args = parser.parse_args()
+
+  """All supported CSR operations"""
+  csr_ops = ['csrrw', 'csrrs', 'csrrc', 'csrrwi', 'csrrsi', 'csrrci']
+
+  """
+  Seed the RNG.
+  If args.seed is None, seed will be drawn from some internal random source.
+  If args.seed is defined, this will be used to seed the RNG for user reproducibility.
+  """
+  random.seed(args.seed)
+
+  gen_csr_instr(get_csr_map(args.csr_file, args.xlen),
+                csr_ops, args.xlen, args.iterations, args.out,
+                args.end_signature_addr)
 
 
-"""
-A list containing all supported CSR instructions.
-"""
-csr_ops = ['csrrw', 'csrrs', 'csrrc', 'csrrwi', 'csrrsi', 'csrrci']
-
-gen_csr_instr(get_csr_map(args.csr_file, args.xlen),
-              csr_ops, args.xlen, args.iterations, args.out,
-              args.end_signature_addr)
+if __name__ == "__main__":
+  main()

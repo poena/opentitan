@@ -2,56 +2,10 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 
-#include "handler.h"
+#include "sw/device/lib/handler.h"
 
-#include "sw/device/lib/common.h"
-#include "sw/device/lib/uart.h"
-
-/**
- * Default exception handler. Can be overidden.
- */
-void handler_exception(void) __attribute__((aligned(4), interrupt, weak));
-
-/**
- * SW IRQ handler. Can be overidden.
- */
-void handler_irq_software(void) __attribute__((aligned(4), interrupt, weak));
-
-/**
- * Timer IRQ handler. Can be overidden.
- */
-void handler_irq_timer(void) __attribute__((aligned(4), interrupt, weak));
-
-/**
- * external IRQ handler. Can be overidden.
- */
-void handler_irq_external(void) __attribute__((aligned(4), interrupt, weak));
-
-/**
- * Instruction access fault. Can be overriden.
- */
-void handler_instr_acc_fault(void) __attribute__((aligned(4), interrupt, weak));
-
-/**
- * Illegal Instruction fault. Can be overriden.
- */
-void handler_instr_ill_fault(void) __attribute__((aligned(4), interrupt, weak));
-;
-
-/**
- * Breakpoint handler. Can be overriden.
- */
-void handler_bkpt(void) __attribute__((aligned(4), interrupt, weak));
-
-/**
- * Load store unit fault. Can be overriden.
- */
-void handler_lsu_fault(void) __attribute__((aligned(4), interrupt, weak));
-
-/**
- * Exception call handler. Can be overriden.
- */
-void handler_ecall(void) __attribute__((aligned(4), interrupt, weak));
+#include "sw/device/lib/base/stdasm.h"
+#include "sw/device/lib/runtime/log.h"
 
 /**
  * Return value of mtval
@@ -68,17 +22,14 @@ static uint32_t get_mtval(void) {
  * TODO - this will be soon by a real print formatting
  */
 static void print_exc_msg(const char *msg) {
-  const uint32_t mtval = get_mtval();
-  uart_send_str((char *)msg);
-  uart_send_str("MTVAL value is ");
-  uart_send_uint(mtval, 32);
-  uart_send_str("\n");
+  LOG_INFO("%s", msg);
+  LOG_INFO("MTVAL value is 0x%x", get_mtval());
   while (1) {
   };
 }
 
 // Below functions are default weak exception handlers meant to be overriden
-void handler_exception(void) {
+__attribute__((weak)) void handler_exception(void) {
   uint32_t mcause;
   exc_id_t exc_cause;
 
@@ -113,49 +64,49 @@ void handler_exception(void) {
   }
 }
 
-void handler_irq_software(void) {
-  uart_send_str("Software IRQ triggered!\n");
+__attribute__((weak)) void handler_irq_software(void) {
+  LOG_INFO("Software IRQ triggered!");
   while (1) {
   }
 }
 
-void handler_irq_timer(void) {
-  uart_send_str("Timer IRQ triggered!\n");
+__attribute__((weak)) void handler_irq_timer(void) {
+  LOG_INFO("Timer IRQ triggered!");
   while (1) {
   }
 }
 
-void handler_irq_external(void) {
-  uart_send_str("External IRQ triggered!\n");
+__attribute__((weak)) void handler_irq_external(void) {
+  LOG_INFO("External IRQ triggered!");
   while (1) {
   }
 }
 
-void handler_instr_acc_fault(void) {
+__attribute__((weak)) void handler_instr_acc_fault(void) {
   const char fault_msg[] =
-      "Instruction access fault, mtval shows fault address\n";
+      "Instruction access fault, mtval shows fault address";
   print_exc_msg(fault_msg);
 }
 
-void handler_instr_ill_fault(void) {
+__attribute__((weak)) void handler_instr_ill_fault(void) {
   const char fault_msg[] =
-      "Illegal Instruction fault, mtval shows instruction content\n";
+      "Illegal Instruction fault, mtval shows instruction content";
   print_exc_msg(fault_msg);
 }
 
-void handler_bkpt(void) {
+__attribute__((weak)) void handler_bkpt(void) {
   const char exc_msg[] =
-      "Breakpoint triggerd, mtval shows the breakpoint address\n";
+      "Breakpoint triggerd, mtval shows the breakpoint address";
   print_exc_msg(exc_msg);
 }
 
-void handler_lsu_fault(void) {
-  const char exc_msg[] = "Load/Store fault, mtval shows the fault address\n";
+__attribute__((weak)) void handler_lsu_fault(void) {
+  const char exc_msg[] = "Load/Store fault, mtval shows the fault address";
   print_exc_msg(exc_msg);
 }
 
-void handler_ecall(void) {
-  uart_send_str("Environment call encountered\n");
+__attribute__((weak)) void handler_ecall(void) {
+  LOG_INFO("Environment call encountered");
   while (1) {
   }
 }

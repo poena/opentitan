@@ -4,9 +4,13 @@
 //
 // The alert sender primitive module differentially encodes and transmits an
 // alert signal to the prim_alert_receiver module. An alert will be signalled
-// by a full handshake on alert_p/n and ack_p/n. The alert_i signal may
+// by a full handshake on alert_p/n and ack_p/n. The alert_req_i signal may
 // be continuously asserted, in which case the alert signalling handshake
 // will be repeatedly initiated.
+//
+// The alert_req_i signal may also be used as part of req/ack. The parent module
+// can keep alert_req_i asserted until it has been ack'd (transferred to the alert
+// receiver).  The parent module is not required to use this.
 //
 // Further, this module supports in-band ping testing, which means that a level
 // change on the ping_p/n diff pair will result in a full-handshake response
@@ -24,14 +28,19 @@
 //
 // See also: prim_alert_receiver, prim_diff_decode, alert_handler
 
-module prim_alert_sender import prim_pkg::*; #(
+`include "prim_assert.sv"
+
+module prim_alert_sender
+  import prim_alert_pkg::*;
+#(
   // enables additional synchronization logic
   parameter bit AsyncOn = 1'b1
 ) (
   input             clk_i,
   input             rst_ni,
   // native alert from the peripheral
-  input             alert_i,
+  input             alert_req_i,
+  output logic      alert_ack_o,
   // ping input diff pair and ack diff pair
   input alert_rx_t  alert_rx_i,
   // alert output diff pair
@@ -78,7 +87,16 @@ module prim_alert_sender import prim_pkg::*; #(
   ///////////////////////////////////////////////////
   // main protocol FSM that drives the diff output //
   ///////////////////////////////////////////////////
-  typedef enum logic [2:0] {Idle, HsPhase1, HsPhase2, SigInt, Pause0, Pause1} state_e;
+  typedef enum logic [2:0] {
+    Idle,
+    AlertHsPhase1,
+    AlertHsPhase2,
+    PingHsPhase1,
+    PingHsPhase2,
+    SigInt,
+    Pause0,
+    Pause1
+    } state_e;
   state_e state_d, state_q;
   logic alert_pq, alert_nq, alert_pd, alert_nd;
   logic sigint_detected;
@@ -92,8 +110,13 @@ module prim_alert_sender import prim_pkg::*; #(
   // alert and ping set regs
   logic alert_set_d, alert_set_q, alert_clr;
   logic ping_set_d, ping_set_q, ping_clr;
-  assign alert_set_d = (alert_clr) ? 1'b0 :  (alert_set_q | alert_i);
+
+  // if handshake is ongoing, capture additional alert requests
+  assign alert_set_d = (alert_clr) ? 1'b0 :  (alert_set_q | alert_req_i);
   assign ping_set_d  = (ping_clr) ? 1'b0 : (ping_set_q | ping_event);
+
+  // alert event acknowledge
+  assign alert_ack_o = alert_clr;
 
   // this FSM performs a full four phase handshake upon a ping or alert trigger.
   // note that the latency of the alert_p/n diff pair is at least one cycle
@@ -112,35 +135,54 @@ module prim_alert_sender import prim_pkg::*; #(
     unique case (state_q)
       Idle: begin
         // alert always takes precedence
-        if (alert_i || alert_set_q || ping_event || ping_set_q) begin
-          state_d   = HsPhase1;
+        if (alert_req_i || alert_set_q || ping_event || ping_set_q) begin
+          state_d   = (alert_req_i || alert_set_q) ? AlertHsPhase1 : PingHsPhase1;
           alert_pd  = 1'b1;
           alert_nd  = 1'b0;
-          if (ping_event || ping_set_q) begin
-            ping_clr  = 1'b1;
-          end else begin
-            alert_clr = 1'b1;
-          end
         end
       end
       // waiting for ack from receiver
-      HsPhase1: begin
+      AlertHsPhase1: begin
         if (ack_level) begin
-          state_d  = HsPhase2;
+          state_d  = AlertHsPhase2;
         end else begin
           alert_pd = 1'b1;
           alert_nd = 1'b0;
         end
       end
       // wait for deassertion of ack
-      HsPhase2: begin
+      AlertHsPhase2: begin
         if (!ack_level) begin
+          state_d = Pause0;
+          alert_clr = 1'b1;
+        end
+      end
+      // waiting for ack from receiver
+      PingHsPhase1: begin
+        if (ack_level) begin
+          state_d  = PingHsPhase2;
+        end else begin
+          alert_pd = 1'b1;
+          alert_nd = 1'b0;
+        end
+      end
+      // wait for deassertion of ack
+      PingHsPhase2: begin
+        if (!ack_level) begin
+          ping_clr = 1'b1;
           state_d = Pause0;
         end
       end
       // pause cycles between back-to-back handshakes
-      Pause0: state_d = Pause1;
-      Pause1: state_d = Idle;
+      Pause0: begin
+        state_d = Pause1;
+      end
+
+      // clear and ack alert request if it was set
+      Pause1: begin
+        state_d = Idle;
+      end
+
       // we have a signal integrity issue at one of
       // the incoming diff pairs. this condition is
       // signalled by setting the output diffpair
@@ -189,18 +231,18 @@ module prim_alert_sender import prim_pkg::*; #(
   ////////////////
 
   // check whether all outputs have a good known state after reset
-  `ASSERT_KNOWN(AlertPKnownO_A, alert_tx_o, clk_i, !rst_ni)
+  `ASSERT_KNOWN(AlertPKnownO_A, alert_tx_o)
 
   if (AsyncOn) begin : gen_async_assert
     // check propagation of sigint issues to output within three cycles
     `ASSERT(SigIntPing_A, alert_rx_i.ping_p == alert_rx_i.ping_n [*2] |->
-        ##3 alert_tx_o.alert_p == alert_tx_o.alert_n, clk_i, !rst_ni)
+        ##3 alert_tx_o.alert_p == alert_tx_o.alert_n)
     `ASSERT(SigIntAck_A,  alert_rx_i.ack_p == alert_rx_i.ack_n   [*2] |->
-        ##3 alert_tx_o.alert_p == alert_tx_o.alert_n, clk_i, !rst_ni)
+        ##3 alert_tx_o.alert_p == alert_tx_o.alert_n)
     // output must be driven diff unless sigint issue detected
     `ASSERT(DiffEncoding_A, (alert_rx_i.ack_p ^ alert_rx_i.ack_n) &&
         (alert_rx_i.ping_p ^ alert_rx_i.ping_n) |->
-        ##3 alert_tx_o.alert_p ^ alert_tx_o.alert_n, clk_i, !rst_ni)
+        ##3 alert_tx_o.alert_p ^ alert_tx_o.alert_n)
 
     // handshakes can take indefinite time if blocked due to sigint on outgoing
     // lines (which is not visible here). thus, we only check whether the
@@ -212,13 +254,12 @@ module prim_alert_sender import prim_pkg::*; #(
   end else begin : gen_sync_assert
     // check propagation of sigint issues to output within one cycle
     `ASSERT(SigIntPing_A, alert_rx_i.ping_p == alert_rx_i.ping_n |=>
-        alert_tx_o.alert_p == alert_tx_o.alert_n, clk_i, !rst_ni)
+        alert_tx_o.alert_p == alert_tx_o.alert_n)
     `ASSERT(SigIntAck_A,  alert_rx_i.ack_p == alert_rx_i.ack_n   |=>
-        alert_tx_o.alert_p == alert_tx_o.alert_n, clk_i, !rst_ni)
+        alert_tx_o.alert_p == alert_tx_o.alert_n)
     // output must be driven diff unless sigint issue detected
     `ASSERT(DiffEncoding_A, (alert_rx_i.ack_p ^ alert_rx_i.ack_n) &&
-        (alert_rx_i.ping_p ^ alert_rx_i.ping_n) |=> alert_tx_o.alert_p ^ alert_tx_o.alert_n,
-        clk_i, !rst_ni)
+        (alert_rx_i.ping_p ^ alert_rx_i.ping_n) |=> alert_tx_o.alert_p ^ alert_tx_o.alert_n)
     // handshakes can take indefinite time if blocked due to sigint on outgoing
     // lines (which is not visible here). thus, we only check whether the handshake
     // is correctly initiated and defer the full handshake checking to the testbench.
@@ -226,8 +267,8 @@ module prim_alert_sender import prim_pkg::*; #(
         $rose(alert_tx_o.alert_p), clk_i, !rst_ni || (alert_tx_o.alert_p == alert_tx_o.alert_n))
   end
 
-  // if alert_i is true, handshakes should be continuously repeated
-  `ASSERT(AlertHs_A, alert_i && state_q == Idle |=> $rose(alert_tx_o.alert_p),
+  // if alert_req_i is true, handshakes should be continuously repeated
+  `ASSERT(AlertHs_A, alert_req_i && state_q == Idle |=> $rose(alert_tx_o.alert_p),
       clk_i, !rst_ni || (alert_tx_o.alert_p == alert_tx_o.alert_n))
 
 endmodule : prim_alert_sender

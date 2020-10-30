@@ -1,7 +1,13 @@
-module usb_serial_fifo_ep  #(
-  parameter MaxPktSizeByte = 32,
-  parameter PktW = $clog2(MaxPktSizeByte)
+// Copyright lowRISC contributors.
+// Copyright Luke Valenty (TinyFPGA project)
+// Licensed under the Apache License, Version 2.0, see LICENSE for details.
+// SPDX-License-Identifier: Apache-2.0
 
+module usb_serial_fifo_ep  #(
+  parameter int unsigned MaxPktSizeByte = 32,
+
+  // Derived parameters
+  localparam int unsigned PktW = $clog2(MaxPktSizeByte)
 ) (
   input               clk_i,
   input               rst_ni,
@@ -57,7 +63,7 @@ module usb_serial_fifo_ep  #(
 
   // In future probably better to eliminate this buffer and add rollback to async FIFO
   // Will receive the 2 bytes of CRC, so may get MAX_PACKET_SIZE+2 bytes
-  logic [7:0] out_pkt_buffer [0:MaxPktSizeByte - 1];
+  logic [7:0] out_pkt_buffer [MaxPktSizeByte];
   logic [PktW - 1:0] ob_rptr;
   logic [PktW:0]     ob_max_used;
   logic          ob_unload;
@@ -83,7 +89,7 @@ module usb_serial_fifo_ep  #(
     end else begin
       if (!do_setup && out_ep_acked_i) begin
         ob_unload <= 1'b1;
-      end else if (({1'b0, ob_rptr} == (ob_max_used - PktW'(2))) && !rx_full) begin
+      end else if (({1'b0, ob_rptr} == (ob_max_used - {1'b0, PktW'(2)})) && !rx_full) begin
         ob_unload <= 1'b0;
       end
     end
@@ -120,7 +126,7 @@ module usb_serial_fifo_ep  #(
   ///////////////////////////////////////
 
   // packet buffer to allow rollback in the case of a NAK
-  logic [7:0]    in_pkt_buffer [0:MaxPktSizeByte - 1];
+  logic [7:0]    in_pkt_buffer [MaxPktSizeByte];
   logic [PktW:0] pb_wptr;
   logic          pb_freeze, pb_done;
   logic [7:0]    pb_rdata;
@@ -203,7 +209,7 @@ module usb_serial_fifo_ep  #(
   logic [7:0] bmRequestType, raw_setup_data [8];
   // Alias for the setup bytes using names from USB spec
   logic [7:0] bRequest;
-  logic [15:0] wValue, wLength; //wIndex
+  logic [15:0] wValue, wLength, wIndex;
 
   assign pkt_start = (out_ep_put_addr_i == '0) && out_ep_data_put_i;
   assign pkt_end = out_ep_acked_i || out_ep_rollback_i;
@@ -226,9 +232,10 @@ module usb_serial_fifo_ep  #(
   assign more_data_to_send = !all_data_sent;
 
   rising_edge_detector detect_in_data_transfer_done (
-    .clk(clk_i),
-    .in(all_data_sent),
-    .out(in_data_transfer_done)
+    .clk_i (clk_i),
+    .rst_ni(rst_ni),
+    .in_i  (all_data_sent),
+    .out_o (in_data_transfer_done)
   );
 
   assign in_setup_has_data = more_data_to_send || send_zero_length_data_pkt;
@@ -245,7 +252,7 @@ module usb_serial_fifo_ep  #(
     status_stage_end = 1'b0;
     send_zero_length_data_pkt = 1'b0;
 
-    case (ctrl_xfr_state)
+    unique case (ctrl_xfr_state)
       StIdle: begin
         if (setup_pkt_start) begin
           ctrl_xfr_state_next = StSetup;
@@ -329,11 +336,14 @@ module usb_serial_fifo_ep  #(
   assign bmRequestType = raw_setup_data[0];
   assign bRequest = raw_setup_data[1];
   assign wValue = {raw_setup_data[3][7:0], raw_setup_data[2][7:0]};
-//assign wIndex = {raw_setup_data[5][7:0], raw_setup_data[4][7:0]};
+  assign wIndex = {raw_setup_data[5][7:0], raw_setup_data[4][7:0]};
   assign wLength = {raw_setup_data[7][7:0], raw_setup_data[6][7:0]};
-  // suppress warning
+
+  // Suppress warnings
   logic [6:0]  unused_bmR;
+  logic [15:0] unused_wIndex;
   assign unused_bmR = bmRequestType[6:0];
+  assign unused_wIndex = wIndex;
 
   // Check of upper put_addr bits needed because CRC will be sent (10 bytes total)
   always_ff @(posedge clk_i) begin
@@ -353,7 +363,7 @@ module usb_serial_fifo_ep  #(
       baud_o <= 16'd1152; // spec is default to 115,200 baud
       parity_o <= 1'b0;   // with no parity
       bytes_sent <= '0;
-      send_length  <= '0;
+      send_length <= '0;
       return_data <= '0;
     end else begin
       if (setup_stage_end) begin
@@ -362,35 +372,35 @@ module usb_serial_fifo_ep  #(
         // so no standard defines for the codes
         // (note looks like this is the first time REQ has been implemented)
         unique case (bRequest)
-          'h00: begin
+          8'h00: begin
             // REQ_PARITY
             return_data <= {14'b0, parity_o};
-            send_length <= 'h2;
+            send_length <= 2'b10;
           end
 
-          'h01: begin
+          8'h01: begin
             // SET_PARITY
-            send_length <= 'h00;
+            send_length <= 2'b00;
             parity_o    <= wValue[1:0];
           end
 
-          'h02: begin
+          8'h02: begin
             // REQ_BAUD
             return_data <= baud_o;
-            send_length <= 'h2;
+            send_length <= 2'b10;
           end
 
-          'h03: begin
+          8'h03: begin
             // SET_BAUD
-            send_length <= 'h00;
+            send_length <= 2'b00;
             baud_o      <= wValue;
           end
           default begin
-            send_length <= 'h00;
+            send_length <= 2'b00;
           end
         endcase
       end else if ((ctrl_xfr_state == StDataIn) && more_data_to_send && in_ep_data_get_i) begin
-        bytes_sent <= bytes_sent + 1'b1;
+        bytes_sent <= bytes_sent + 2'b01;
       end else if (status_stage_end) begin
         bytes_sent <= '0;
       end

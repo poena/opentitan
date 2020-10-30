@@ -4,39 +4,36 @@
 
 #include "sw/device/lib/uart.h"
 
-#include "sw/device/lib/common.h"
+#include "sw/device/lib/arch/device.h"
+#include "sw/device/lib/dif/dif_uart.h"
+#include "sw/device/lib/runtime/ibex.h"
 
-inline void uart_init(unsigned int baud) {
-  // nco = 2^20 * baud / fclk
-  uint64_t uart_ctrl_nco = ((uint64_t)baud << 20) / CLK_FIXED_FREQ_HZ;
-  REG32(UART_CTRL(0)) =
-      ((uart_ctrl_nco & UART_CTRL_NCO_MASK) << UART_CTRL_NCO_OFFSET) |
-      (1 << UART_CTRL_TX) | (1 << UART_CTRL_RX);
+#include "hw/top_earlgrey/sw/autogen/top_earlgrey.h"
 
-  // reset RX/TX FIFOs
-  REG32(UART_FIFO_CTRL(0)) =
-      (1 << UART_FIFO_CTRL_RXRST) | (1 << UART_FIFO_CTRL_TXRST);
+static dif_uart_t uart0;
 
-  // disable interrupts
-  REG32(UART_INTR_ENABLE(0)) = 0;
-}
-
-static int uart_tx_rdy(void) {
-  return !(REG32(UART_STATUS(0)) & (1 << UART_STATUS_TXFULL));
+void uart_init(unsigned int baud) {
+  // Note that, due to a GCC bug, we cannot use the standard `(void) expr`
+  // syntax to drop this value on the ground.
+  // See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=25509
+  mmio_region_t base_addr = mmio_region_from_addr(TOP_EARLGREY_UART_BASE_ADDR);
+  if (dif_uart_init((dif_uart_params_t){.base_addr = base_addr}, &uart0)) {
+  }
+  if (dif_uart_configure(&uart0, (dif_uart_config_t){
+                                     .baudrate = baud,
+                                     .clk_freq_hz = kClockFreqPeripheralHz,
+                                     .parity_enable = kDifUartToggleDisabled,
+                                     .parity = kDifUartParityEven,
+                                 })) {
+  }
 }
 
 void uart_send_char(char c) {
-  while (!uart_tx_rdy()) {
+  // Note that, due to a GCC bug, we cannot use the standard `(void) expr`
+  // syntax to drop this value on the ground.
+  // See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=25509
+  if (dif_uart_byte_send_polled(&uart0, (uint8_t)c)) {
   }
-  REG32(UART_WDATA(0)) = c;
-}
-
-int uart_tx_empty(void) {
-  return !!(REG32(UART_STATUS(0)) & (1 << UART_STATUS_TXEMPTY));
-}
-
-int uart_tx_idle(void) {
-  return !!(REG32(UART_STATUS(0)) & (1 << UART_STATUS_TXIDLE));
 }
 
 void uart_send_str(char *str) {
@@ -44,6 +41,17 @@ void uart_send_str(char *str) {
     uart_send_char(*str++);
   }
 }
+
+size_t uart_send_buf(void *data, const char *buf, size_t len) {
+  for (size_t i = 0; i < len; ++i) {
+    uart_send_char(buf[i]);
+  }
+  return len;
+}
+
+const buffer_sink_t uart_stdout = {
+    .data = NULL, .sink = &uart_send_buf,
+};
 
 #define hexchar(i) (((i & 0xf) > 9) ? (i & 0xf) - 10 + 'A' : (i & 0xf) + '0')
 
@@ -53,15 +61,19 @@ void uart_send_uint(uint32_t n, int bits) {
   }
 }
 
-int uart_rx_empty(void) {
-  return !!(REG32(UART_STATUS(0)) & (1 << UART_STATUS_RXEMPTY));
-}
-
 int uart_rcv_char(char *c) {
-  if (uart_rx_empty()) {
+  size_t num_bytes = 0;
+  if (dif_uart_rx_bytes_available(&uart0, &num_bytes) != kDifUartOk) {
+    return -1;
+  }
+  if (num_bytes == 0) {
+    return -1;
+  }
+  // The pointer cast from char* to uint8_t* is dangerous. This needs to be
+  // revisited.
+  if (dif_uart_bytes_receive(&uart0, 1, (uint8_t *)c, NULL) != kDifUartOk) {
     return -1;
   }
 
-  *c = REG32(UART_RDATA(0));
   return 0;
 }

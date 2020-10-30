@@ -3,26 +3,39 @@ CAPI=2:
 # Licensed under the Apache License, Version 2.0, see LICENSE for details.
 # SPDX-License-Identifier: Apache-2.0
 name: "lowrisc:ip:padctrl:0.1"
-description: "Pad Control IP"
+description: "Pad control IP"
 
 filesets:
   files_rtl:
     depend:
-      - lowrisc:ip:tlul
-      - lowrisc:prim:all
-      - lowrisc:prim:prim_pkg
-    files:
-      - rtl/padctrl_reg_pkg.sv
-      - rtl/padctrl_reg_top.sv
-      - rtl/padring.sv
-      - rtl/padctrl.sv
-    file_type: systemVerilogSource
+      - lowrisc:ip:padctrl_reg
+      - lowrisc:ip:padctrl_component
+
+parameters:
+  SYNTHESIS:
+    datatype: bool
+    paramtype: vlogdefine
 
 
 targets:
   default: &default_target
     filesets:
       - files_rtl
-    toplevel: padctrl padring
+    toplevel: padctrl
+
+  lint:
+    <<: *default_target
+    default_tool: verilator
+    parameters:
+      - SYNTHESIS=true
+    tools:
+      ascentlint:
+        ascentlint_options:
+          - "-wait_license"
+          - "-stop_on_error"
+      verilator:
+        mode: lint-only
+        verilator_options:
+          - "-Wall"
 
 

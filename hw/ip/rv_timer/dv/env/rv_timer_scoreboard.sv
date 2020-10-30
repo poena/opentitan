@@ -20,6 +20,7 @@ class rv_timer_scoreboard extends cip_base_scoreboard #(.CFG_T (rv_timer_env_cfg
   local bit [NUM_HARTS-1:0][NUM_TIMERS-1:0] en_interrupt;
   local bit [NUM_HARTS-1:0][NUM_TIMERS-1:0] ignore_period;
   local bit [NUM_HARTS-1:0] num_clk_update_due;
+  local bit ctimecmp_update_on_fly;
 
   // expected values
   local uint intr_status_exp[NUM_HARTS];
@@ -39,9 +40,6 @@ class rv_timer_scoreboard extends cip_base_scoreboard #(.CFG_T (rv_timer_env_cfg
     bit     do_read_check   = 1'b1;
     bit     write           = item.is_write();
     uvm_reg_addr_t csr_addr = get_normalized_addr(item.a_addr);
-
-    super.process_tl_access(item, channel);
-    if (is_tl_err_exp || is_tl_unmapped_addr) return;
 
     // if access was to a valid csr, get the csr handle
     if (csr_addr inside {cfg.csr_addrs}) begin
@@ -79,7 +77,7 @@ class rv_timer_scoreboard extends cip_base_scoreboard #(.CFG_T (rv_timer_env_cfg
         (!uvm_re_match("ctrl*", csr_name)): begin
           for (int i = 0; i < NUM_HARTS; i++) begin
             for (int j = 0; j < NUM_TIMERS; j++) begin
-              en_timers[i][j] = get_reg_fld_mirror_value(ral, "ctrl", $sformatf("active%0d", j));
+              en_timers[i][j] = get_reg_fld_mirror_value(ral, "ctrl", $sformatf("active_%0d", j));
             end
             //Sample all timers active coverage for each hart
             if (cfg.en_cov) cov.ctrl_reg_cov_obj[i].timer_active_cg.sample(en_timers[i]);
@@ -95,27 +93,67 @@ class rv_timer_scoreboard extends cip_base_scoreboard #(.CFG_T (rv_timer_env_cfg
           for (int i = 0; i < NUM_HARTS; i++) begin
             timer_val[i][31:0] = get_reg_fld_mirror_value(
                                      ral, $sformatf("timer_v_lower%0d", i), "v");
+            num_clk_update_due[i] = 1'b1;
           end
         end
         (!uvm_re_match("timer_v_upper*", csr_name)): begin
           for (int i = 0; i < NUM_HARTS; i++) begin
             timer_val[i][63:32] = get_reg_fld_mirror_value(
                                       ral, $sformatf("timer_v_upper%0d", i), "v");
+            num_clk_update_due[i] = 1'b1;
           end
         end
         (!uvm_re_match("compare_lower*", csr_name)): begin
           for (int i = 0; i < NUM_HARTS; i++) begin
             for (int j = 0; j < NUM_TIMERS; j++) begin
-              compare_val[i][j][31:0] = get_reg_fld_mirror_value(
-                                            ral, $sformatf("compare_lower%0d_%0d", i, j), "v");
+              int timer_idx = i * NUM_TIMERS + j;
+              string compare_lower_str = $sformatf("compare_lower%0d_%0d", i, j);
+              if (csr_name == compare_lower_str) begin
+                compare_val[i][j][31:0] = csr.get_mirrored_value();
+                if (en_timers[i][j] == 0) begin
+                  // Reset the interrupt when mtimecmp is updated and timer is not active
+                  intr_status_exp[i][j] = 0;
+                  if (cfg.en_cov) begin
+                    cov.sticky_intr_cov[{"rv_timer_sticky_intr_pin",
+                                        $sformatf("%0d", timer_idx)}].sample(1'b0);
+                  end
+                end else begin
+                  // intr stays sticky if timer is active
+                  ctimecmp_update_on_fly = 1;
+                  if (cfg.en_cov) begin
+                    cov.sticky_intr_cov[{"rv_timer_sticky_intr_pin",
+                                        $sformatf("%0d", timer_idx)}].sample(intr_status_exp[i][j]);
+                  end
+                end
+                break;
+              end
             end
           end
         end
         (!uvm_re_match("compare_upper*", csr_name)): begin
           for (int i = 0; i < NUM_HARTS; i++) begin
             for (int j = 0; j < NUM_TIMERS; j++) begin
-              compare_val[i][j][63:32] = get_reg_fld_mirror_value(
-                                             ral, $sformatf("compare_upper%0d_%0d", i, j), "v");
+              int timer_idx = i * NUM_TIMERS + j;
+              string compare_upper_str = $sformatf("compare_upper%0d_%0d", i, j);
+              if (csr_name == compare_upper_str) begin
+                compare_val[i][j][63:32] = csr.get_mirrored_value();
+                if (en_timers[i][j] == 0) begin
+                  // Reset the interrupt when mtimecmp is updated and timer is not active
+                  intr_status_exp[i][j] = 0;
+                  if (cfg.en_cov) begin
+                    cov.sticky_intr_cov[{"rv_timer_sticky_intr_pin",
+                                        $sformatf("%0d", timer_idx)}].sample(1'b0);
+                  end
+                end else begin
+                  // intr stays sticky if timer is active
+                  ctimecmp_update_on_fly = 1;
+                  if (cfg.en_cov) begin
+                    cov.sticky_intr_cov[{"rv_timer_sticky_intr_pin",
+                                        $sformatf("%0d", timer_idx)}].sample(intr_status_exp[i][j]);
+                  end
+                end
+                break;
+              end
             end
           end
         end
@@ -123,7 +161,7 @@ class rv_timer_scoreboard extends cip_base_scoreboard #(.CFG_T (rv_timer_env_cfg
           for (int i = 0; i < NUM_HARTS; i++) begin
             for (int j = 0; j < NUM_TIMERS; j++) begin
               en_interrupt[i][j] = get_reg_fld_mirror_value(
-                                       ral, $sformatf("intr_enable%0d", i), $sformatf("ie%0d", j));
+                                       ral, $sformatf("intr_enable%0d", i), $sformatf("ie_%0d", j));
             end
           end
         end
@@ -156,10 +194,8 @@ class rv_timer_scoreboard extends cip_base_scoreboard #(.CFG_T (rv_timer_env_cfg
           for (int i = 0; i < NUM_HARTS; i++) begin
             string intr_test_str = $sformatf("intr_test%0d", i);
             if (csr_name == intr_test_str) begin
-              uint intr_test_val = get_reg_fld_mirror_value(ral, intr_test_str);
-              // this field is WO - always returns 0
-              void'(csr.predict(.value(0), .kind(UVM_PREDICT_WRITE)));
-              foreach (intr_test_val[j]) begin
+              uint intr_test_val = item.a_data;
+              for (int j = 0 ; j < NUM_TIMERS; j++) begin
                 int intr_pin_idx = i * NUM_TIMERS + j;
                 if (intr_test_val[j]) intr_status_exp[i][j] = intr_test_val[j];
                 //Sample intr_test coverage for each bit of test reg
@@ -177,8 +213,12 @@ class rv_timer_scoreboard extends cip_base_scoreboard #(.CFG_T (rv_timer_env_cfg
     end
 
     if (channel == DataChannel) begin
-      // Check all interrupts in DataChannel of every Read/Write
-      check_interrupt_pin();
+      // Check all interrupts in DataChannel of every Read/Write except when ctimecmp updated
+      // during timer active. This scenario is checked in base sequence by reading the intr_state.
+      // Ignored checking here because sticky intr_pin update has one cycle delay.
+      // TODO #1464: temp constraint, if support external reg, this can be removed
+      if (!ctimecmp_update_on_fly) check_interrupt_pin();
+      ctimecmp_update_on_fly = 0;
 
       // On reads, if do_read_check, is set, then check mirrored_value against item.d_data
       if (!write) begin
@@ -295,22 +335,35 @@ class rv_timer_scoreboard extends cip_base_scoreboard #(.CFG_T (rv_timer_env_cfg
     end // wait_for_interrupt
   endtask : compute_and_check_interrupt
 
-  // function : check_interrupt_pin
+  // task : check_interrupt_pin
   // check all interrupt output pins with expected intr state & pin enable
-  function void check_interrupt_pin();
-    for (int i = 0; i < NUM_HARTS; i++) begin
-      for (int j = 0; j < NUM_TIMERS; j++) begin
-        int intr_pin_idx = i * NUM_TIMERS + j;
-        `DV_CHECK_CASE_EQ(cfg.intr_vif.sample_pin(.idx(intr_pin_idx)),
-                          (intr_status_exp[i][j] & en_interrupt[i][j]))
-        //Sample interrupt and interrupt pin coverage for each timer
-        if (cfg.en_cov) begin
-          cov.intr_cg.sample(intr_pin_idx, en_interrupt[i][j], intr_status_exp[i][j]);
-          cov.intr_pins_cg.sample(intr_pin_idx, cfg.intr_vif.sample_pin(.idx(intr_pin_idx)));
+  // according to issue #841, interrupt will have one clock cycle delay
+  task check_interrupt_pin();
+    fork
+      begin
+        // store the `intr_status_exp` and `en_interrupt` values into an automatic local variable
+        // in case the values are being updated during the one clock cycle wait.
+        automatic uint stored_intr_status_exp[NUM_HARTS] = intr_status_exp;
+        automatic bit [NUM_HARTS-1:0][NUM_TIMERS-1:0] stored_en_interrupt = en_interrupt;
+        cfg.clk_rst_vif.wait_clks(1);
+        if (!under_reset) begin
+          for (int i = 0; i < NUM_HARTS; i++) begin
+            for (int j = 0; j < NUM_TIMERS; j++) begin
+              int intr_pin_idx = i * NUM_TIMERS + j;
+              `DV_CHECK_CASE_EQ(cfg.intr_vif.sample_pin(.idx(intr_pin_idx)),
+                                (stored_intr_status_exp[i][j] & stored_en_interrupt[i][j]))
+              // Sample interrupt and interrupt pin coverage for each timer
+              if (cfg.en_cov) begin
+                cov.intr_cg.sample(intr_pin_idx, stored_en_interrupt[i][j],
+                                   stored_intr_status_exp[i][j]);
+                cov.intr_pins_cg.sample(intr_pin_idx, cfg.intr_vif.sample_pin(.idx(intr_pin_idx)));
+              end
+            end
+          end
         end
       end
-    end
-  endfunction
+    join_none
+  endtask
 
   virtual function void reset(string kind = "HARD");
     super.reset(kind);
@@ -324,6 +377,7 @@ class rv_timer_scoreboard extends cip_base_scoreboard #(.CFG_T (rv_timer_env_cfg
     intr_status_exp = '{default:0};
     ignore_period   = '{default:0};
     en_timers_prev  = '{default:0};
+    ctimecmp_update_on_fly = 0;
   endfunction
 
   function void check_phase(uvm_phase phase);

@@ -10,9 +10,9 @@ title: "I2C DV Plan"
   * Verify TileLink device protocol compliance with an SVA based testbench
 
 ## Current status
-* [Design & verification stage]({{< relref "doc/project/hw_dashboard" >}})
-  * [HW development stages]({{< relref "doc/project/hw_stages.md" >}})
-* DV regression results dashboard (link TBD)
+* [Design & verification stage]({{< relref "hw" >}})
+  * [HW development stages]({{< relref "doc/project/development_stages.md" >}})
+* [Simulation results](https://reports.opentitan.org/hw/ip/i2c/dv/latest/results.html)
 
 ## Design features
 For detailed information on I2C design features, please see the
@@ -45,7 +45,6 @@ All common types and methods defined at the package level can be found in
 ```systemverilog
 parameter uint I2C_FMT_FIFO_DEPTH = 32;
 parameter uint I2C_RX_FIFO_DEPTH  = 32;
-parameter uint I2C_ADDR_MAP_SIZE  = 128;
 ```
 
 ### TL_agent
@@ -54,13 +53,12 @@ which provides the ability to drive and independently monitor random traffic via
 TL host interface into I2C device.
 
 ### I2C agent
-[describe or provide link to I2C agent documentation]
+I2C agent is configured to work device mode and implemented as [reactive agent](https://www.verilab.com/files/mastering_reactive_slaves.pdf)
 
 ### UVM RAL Model
-The I2C RAL model is created with the `hw/dv/tools/gen_ral_pkg.py` wrapper script at the start of the simulation automatically and is placed in the build area, along with a corresponding `fusesoc` core file.
-The wrapper script invokes the [regtool.py]({{< relref "util/reggen/README.md" >}}) script from within to generate the RAL model.
+The I2C RAL model is created with the [`ralgen`]({{< relref "hw/dv/tools/ralgen/README.md" >}}) FuseSoC generator script automatically when the simulation is at the build stage.
 
-It can be created manually by running `make ral` command from the `dv` area.
+It can be created manually by invoking [`regtool`]({{< relref "util/reggen/README.md" >}}):
 
 ### Stimulus strategy
 #### Test sequences
@@ -96,8 +94,7 @@ We are using our in-house developed [regression tool]({{< relref "hw/dv/tools/RE
 Please take a look at the link for detailed information on the usage, capabilities, features and known issues.
 Here's how to run a basic sanity test:
 ```console
-$ cd hw/ip/foo/dv
-$ make TEST_NAME=i2c_sanity
+$ $REPO_TOP/util/dvsim/dvsim.py $REPO_TOP/hw/ip/i2c/dv/i2c_sim_cfg.hjson -i i2c_sanity
 ```
 
 ## Testplan

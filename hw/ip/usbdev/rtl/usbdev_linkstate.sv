@@ -6,177 +6,291 @@
 //
 
 module usbdev_linkstate (
-  input        clk_48mhz_i,
-  input        rst_ni,
-  input        us_tick_i,
-  input        usb_sense_i,
-  input        usb_rx_dp_i,
-  input        usb_rx_dn_i,
-  input        sof_valid_i,
-  output logic link_disconnect_o,
-  output logic link_reset_o,
-  output logic link_suspend_o,
-  output logic link_resume_o,
-  output logic [1:0] link_state_o,
-  output logic host_lost_o
+  input  logic clk_48mhz_i,
+  input  logic rst_ni,
+  input  logic us_tick_i,
+  input  logic usb_sense_i,
+  input  logic rx_se0_det_i,
+  input  logic rx_jjj_det_i,
+  input  logic sof_valid_i,
+  output logic link_disconnect_o,  // level
+  output logic link_connect_o,     // level
+  output logic link_reset_o,       // level
+  output logic link_active_o,      // level
+  output logic link_suspend_o,     // level
+  output logic link_resume_o,      // pulse
+  output logic host_lost_o,        // level
+
+  output logic [2:0] link_state_o
 );
 
-  localparam SUSPEND_TIMEOUT = 12'd3000; // 3ms by spec
-  localparam RESET_TIMEOUT   = 12'd3;    // 3us. Can be 2.5us - 10ms by spec
+  localparam logic [11:0] SUSPEND_TIMEOUT = 12'd3000; // 3ms by spec
+  localparam logic [2:0]  RESET_TIMEOUT   = 3'd3;     // 3us. Can be 2.5us - 10ms by spec
 
   typedef enum logic [2:0] {
-    LinkDisconnect  = 3'h000,
-    // Reset state
-    LinkReset       = 3'b001,
-    // Suspend state
-    LinkSuspend     = 3'b010,
+    // Unpowered state
+    LinkDisconnect = 0,
+    // Powered states
+    LinkPowered = 1,
+    LinkPoweredSuspend = 2,
     // Active states
-    LinkActive      = 3'b100,
-    LinkWaitSuspend = 3'b101,
-    LinkWaitReset   = 3'b110
+    LinkActive = 3,
+    LinkActiveNoSOF = 5,
+    LinkSuspend = 4
   } link_state_e;
 
-  link_state_e  link, link_next;
-  logic        link_active, resume_next;
-  logic        rx_dp, rx_dn;
-  logic        line_se0, line_idle;
-  logic        see_se0, see_idle;
-  logic [11:0] timeout, timeout_next;
-  logic        time_expire, waiting, waiting_next;
+  typedef enum logic [1:0] {
+    NoRst,
+    RstCnt,
+    RstPend
+  } link_rst_state_e;
 
-  assign link_disconnect_o = (link == LinkDisconnect);
-  assign link_reset_o      = (link == LinkReset);
-  assign link_suspend_o    = (link == LinkSuspend);
-  assign link_active       = (link == LinkActive) |
-                             (link == LinkWaitSuspend) |
-                             (link == LinkWaitReset);
-  // re-encode to enum values from register description
-  // (so sw doesn't have to deal with changes between the active states)
-  assign link_state_o      = link_disconnect_o ? 2'h0 :
-                             link_suspend_o ? 2'h2 :
-                             link_reset_o ? 2'h1 : 2'h3;
+  typedef enum logic [1:0] {
+    Active,
+    InactCnt,
+    InactPend
+  } link_inac_state_e;
 
-  prim_flop_2sync #(.Width(2)) syncrx (
-    .clk_i (clk_48mhz_i),
-    .rst_ni (rst_ni),
-    .d ({usb_rx_dp_i, usb_rx_dn_i}),
-    .q ({rx_dp, rx_dn})
-  );
-  assign line_se0 = (rx_dp == 1'b0) & (rx_dn == 1'b0);
-  assign line_idle = (rx_dp == 1'b1) & (rx_dn == 1'b0); // same as J
+  link_state_e  link_state_d, link_state_q;
+  logic         see_pwr_sense;
 
-  // four ticks is a bit time
-  // Could completely filter out 2-cycle EOP SE0 here but
-  // does not seem needed
-  prim_filter #(.Cycles(6)) filter_se0 (
+  // Reset FSM
+  logic [2:0]      link_rst_timer_d, link_rst_timer_q;
+  link_rst_state_e link_rst_state_d, link_rst_state_q;
+  logic            link_reset; // reset detected (level)
+
+  // Link inactivity detection
+  logic              monitor_inac; // monitor link inactivity
+  logic [11:0]       link_inac_timer_d, link_inac_timer_q;
+  link_inac_state_e  link_inac_state_d, link_inac_state_q;
+
+
+  // Events that are not triggered by a timeout
+  logic ev_bus_active;
+
+  // Events that are triggered by timeout
+  logic ev_bus_inactive, ev_reset;
+
+  assign link_disconnect_o = (link_state_q == LinkDisconnect);
+  assign link_connect_o    = (link_state_q != LinkDisconnect);
+  assign link_suspend_o    = (link_state_q == LinkSuspend ||
+    link_state_q == LinkPoweredSuspend);
+  assign link_active_o     = (link_state_q == LinkActive) ||
+    (link_state_q == LinkActiveNoSOF);
+  // Link state is stable, so we can output it to the register
+  assign link_state_o      =  link_state_q;
+
+  prim_filter #(.Cycles(6)) filter_pwr_sense (
     .clk_i    (clk_48mhz_i),
     .rst_ni   (rst_ni),
     .enable_i (1'b1),
-    .filter_i (line_se0),
-    .filter_o (see_se0)
+    .filter_i (usb_sense_i),
+    .filter_o (see_pwr_sense)
   );
 
-  prim_filter #(.Cycles(6)) filter_idle (
-    .clk_i    (clk_48mhz_i),
-    .rst_ni   (rst_ni),
-    .enable_i (1'b1),
-    .filter_i (line_idle),
-    .filter_o (see_idle)
-  );
+  // Simple events
+  assign ev_bus_active = !rx_jjj_det_i;
+
+  assign monitor_inac = see_pwr_sense ? ((link_state_q == LinkPowered) | link_active_o) :
+                        1'b0;
 
   always_comb begin
-    link_next = link;
+    link_state_d = link_state_q;
+    link_resume_o = 0;
 
     // If VBUS ever goes away the link has disconnected
-    if (!usb_sense_i) begin
-      link_next = LinkDisconnect;
+    if (!see_pwr_sense) begin
+      link_state_d = LinkDisconnect;
     end else begin
-      case (link)
+      unique case (link_state_q)
+        // No USB supply detected (USB spec: Attached)
         LinkDisconnect: begin
-          if (usb_sense_i) begin
-            link_next = LinkReset;
+          if (see_pwr_sense) begin
+            link_state_d = LinkPowered;
           end
         end
 
-        LinkWaitReset: begin
-          if (!see_se0) begin
-            link_next = LinkActive;
-          end else if (time_expire) begin
-            link_next = LinkReset;
+        LinkPowered: begin
+          if (ev_reset) begin
+            link_state_d = LinkActiveNoSOF;
+          end else if (ev_bus_inactive) begin
+            link_state_d = LinkPoweredSuspend;
           end
         end
 
-        LinkReset: begin
-          if (!see_se0) begin
-            link_next = LinkActive;
+        LinkPoweredSuspend: begin
+          if (ev_reset) begin
+            link_state_d = LinkActiveNoSOF;
+          end else if (ev_bus_active) begin
+            link_resume_o = 1;
+            link_state_d  = LinkPowered;
           end
         end
 
-        LinkWaitSuspend: begin
-          if (!see_idle) begin
-            link_next = LinkActive;
-          end else if (time_expire) begin
-            link_next = LinkSuspend;
+        // Active but not yet seen a frame
+        // One reason for getting stuck here is the host thinks it is a LS link
+        // which could happen if the flipped bit does not match the actual pins
+        // Annother is the SI is bad so good data is not recovered from the link
+        LinkActiveNoSOF: begin
+          if (ev_bus_inactive) begin
+            link_state_d = LinkSuspend;
+          end else if (sof_valid_i) begin
+            link_state_d = LinkActive;
+          end
+        end
+
+        // Active (USB spec: Default / Address / Configured)
+        LinkActive: begin
+          if (ev_bus_inactive) begin
+            link_state_d = LinkSuspend;
+          end else if (ev_reset) begin
+            link_state_d = LinkActiveNoSOF;
           end
         end
 
         LinkSuspend: begin
-          if (!see_idle) begin
-            link_next = LinkActive;
-          end
-        end
-
-        LinkActive: begin
-          if (see_se0) begin
-            link_next = LinkWaitReset;
-          end else if (see_idle) begin
-            link_next = LinkWaitSuspend;
+          if (ev_reset) begin
+            link_resume_o = 1;
+            link_state_d  = LinkActiveNoSOF;
+          end else if (ev_bus_active) begin
+            link_resume_o = 1;
+            link_state_d  = LinkActive;
           end
         end
 
         default: begin
-          link_next = LinkDisconnect;
+          link_state_d = LinkDisconnect;
         end
-      endcase // case (link)
-    end
-  end
-  assign waiting_next = (link_next == LinkWaitReset) |
-                        (link_next == LinkWaitSuspend);
-  assign timeout_next = (link_next == LinkWaitReset) ? RESET_TIMEOUT : SUSPEND_TIMEOUT;
-  assign resume_next = (link == LinkSuspend) & (link_next == LinkActive);
-
-  always_ff @(posedge clk_48mhz_i or negedge rst_ni) begin
-    if (!rst_ni) begin
-      link <= LinkDisconnect;
-      timeout <= '0;
-      waiting <= 1'b0;
-      link_resume_o <= 1'b0;
-    end else begin
-      link <= link_next;
-      timeout <= timeout_next;
-      waiting <= waiting_next;
-      link_resume_o <= resume_next;
+      endcase // case (link_state_q)
     end
   end
 
-  logic [11:0] activity_timer; // Max timeout 3ms == 3000us
-
   always_ff @(posedge clk_48mhz_i or negedge rst_ni) begin
     if (!rst_ni) begin
-      activity_timer <= '0;
-      time_expire <= 1'b0;
+      link_state_q <= LinkDisconnect;
     end else begin
-      if (!waiting) begin
-        activity_timer <= '0;
-        time_expire <= 1'b0;
-      end else if (activity_timer > timeout) begin
-        time_expire <= 1'b1;
-      end else if (us_tick_i) begin
-        activity_timer <= activity_timer + 1'b1;
+      link_state_q <= link_state_d;
+    end
+  end
+
+  /////////////////////
+  // Reset detection //
+  /////////////////////
+  //  Here we clean up the SE0 signal and generate a signle ev_reset at
+  //  the end of a valid reset
+
+  always_comb begin : proc_rst_fsm
+    link_rst_state_d  = link_rst_state_q;
+    link_rst_timer_d  = link_rst_timer_q;
+    ev_reset          = 1'b0;
+    link_reset        = 1'b0;
+
+    unique case (link_rst_state_q)
+      // No reset signal detected
+      NoRst: begin
+        if (rx_se0_det_i) begin
+          link_rst_state_d = RstCnt;
+          link_rst_timer_d = 0;
+        end
       end
+
+      // Reset signal detected -> counting
+      RstCnt: begin
+        if (!rx_se0_det_i) begin
+          link_rst_state_d = NoRst;
+        end else begin
+          if (us_tick_i) begin
+            if (link_rst_timer_q == RESET_TIMEOUT) begin
+              link_rst_state_d = RstPend;
+            end else begin
+              link_rst_timer_d = link_rst_timer_q + 1;
+            end
+          end
+        end
+      end
+
+      // Detected reset -> wait for falling edge
+      RstPend: begin
+        if (!rx_se0_det_i) begin
+          link_rst_state_d = NoRst;
+          ev_reset = 1'b1;
+        end
+        link_reset = 1'b1;
+      end
+
+      default : link_rst_state_d = NoRst;
+    endcase
+  end
+
+  assign link_reset_o = link_reset;
+
+  always_ff @(posedge clk_48mhz_i or negedge rst_ni) begin : proc_reg_rst
+    if (!rst_ni) begin
+      link_rst_state_q <= NoRst;
+      link_rst_timer_q <= 0;
+    end else begin
+      link_rst_state_q <= link_rst_state_d;
+      link_rst_timer_q <= link_rst_timer_d;
     end
   end
 
+  ////////////////////
+  // Idle detection //
+  ////////////////////
+  //  Here we clean up the idle signal and generate a signle ev_bus_inactive
+  //  after the timer expires
+  always_comb begin : proc_idle_det
+    link_inac_state_d = link_inac_state_q;
+    link_inac_timer_d = link_inac_timer_q;
+    ev_bus_inactive   = 0;
+
+    unique case (link_inac_state_q)
+      // Active or disabled
+      Active: begin
+        link_inac_timer_d = 0;
+        if (!ev_bus_active && monitor_inac) begin
+          link_inac_state_d = InactCnt;
+        end
+      end
+
+      // Got an inactivity signal -> count duration
+      InactCnt: begin
+        if (ev_bus_active || !monitor_inac) begin
+          link_inac_state_d  = Active;
+        end else if (us_tick_i) begin
+          if (link_inac_timer_q == SUSPEND_TIMEOUT) begin
+            link_inac_state_d = InactPend;
+            ev_bus_inactive = 1;
+          end else begin
+            link_inac_timer_d = link_inac_timer_q + 1;
+          end
+        end
+      end
+
+      // Counter expired & event sent, wait here
+      InactPend: begin
+        if (ev_bus_active || !monitor_inac) begin
+          link_inac_state_d  = Active;
+        end
+      end
+
+      default : link_inac_state_d = Active;
+    endcase
+  end
+
+  always_ff @(posedge clk_48mhz_i or negedge rst_ni) begin : proc_reg_idle_det
+    if (!rst_ni) begin
+      link_inac_state_q <= Active;
+      link_inac_timer_q <= 0;
+    end else begin
+      link_inac_state_q <= link_inac_state_d;
+      link_inac_timer_q <= link_inac_timer_d;
+    end
+  end
+
+  /////////////////////////
+  // Host loss detection //
+  /////////////////////////
   // host_lost if no sof in 4.096ms (supposed to be every 1ms)
   // and the link is active
   logic [12:0] host_presence_timer;
@@ -186,10 +300,10 @@ module usbdev_linkstate (
     if (!rst_ni) begin
       host_presence_timer <= '0;
     end else begin
-      if (sof_valid_i || !link_active) begin
+      if (sof_valid_i || !link_active_o || link_reset) begin
         host_presence_timer <= '0;
       end else if (us_tick_i && !host_lost_o) begin
-        host_presence_timer <= host_presence_timer + 1'b1;
+        host_presence_timer <= host_presence_timer + 1;
       end
     end
   end

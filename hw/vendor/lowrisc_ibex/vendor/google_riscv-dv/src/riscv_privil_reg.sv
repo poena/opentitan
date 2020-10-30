@@ -77,10 +77,11 @@ class riscv_privil_reg extends riscv_reg#(privileged_reg_t);
         add_field("TVM",   1,  WARL);
         add_field("TW",    1,  WARL);
         add_field("TSR",   1,  WARL);
+        add_field("VS",    2,  WARL);
         if(XLEN == 32) begin
-          add_field("WPRI3", 8,  WPRI);
+          add_field("WPRI3", 6,  WPRI);
         end else begin
-          add_field("WPRI3", 9,  WPRI);
+          add_field("WPRI3", 7,  WPRI);
           add_field("UXL",   2,  WARL);
           add_field("SXL",   2,  WARL);
           add_field("WPRI4", XLEN - 37, WPRI);
@@ -281,15 +282,8 @@ class riscv_privil_reg extends riscv_reg#(privileged_reg_t);
       // Physical Memory Protection Configuration Register
       PMPCFG1: begin
         privil_level = M_LEVEL;
-        if(XLEN==64) begin
-          add_field("PMP8CFG", 8, WARL);
-          add_field("PMP9CFG", 8, WARL);
-          add_field("PMP10CFG", 8, WARL);
-          add_field("PMP11CFG", 8, WARL);
-          add_field("PMP12CFG", 8, WARL);
-          add_field("PMP13CFG", 8, WARL);
-          add_field("PMP14CFG", 8, WARL);
-          add_field("PMP15CFG", 8, WARL);
+        if(XLEN!=32) begin
+          `uvm_fatal(`gfn, "CSR PMPCFG1 only exists in RV32.")
         end else begin
           add_field("PMP4CFG", 8, WARL);
           add_field("PMP5CFG", 8, WARL);
@@ -299,14 +293,17 @@ class riscv_privil_reg extends riscv_reg#(privileged_reg_t);
       end
       // Physical Memory Protection Configuration Register
       PMPCFG2: begin
-        if(XLEN!=32) begin
-          `uvm_fatal(get_full_name(), "CSR PMPCFG2 only exists in RV32.")
-        end
         privil_level = M_LEVEL;
         add_field("PMP8CFG", 8, WARL);
         add_field("PMP9CFG", 8, WARL);
         add_field("PMP10CFG", 8, WARL);
         add_field("PMP11CFG", 8, WARL);
+        if(XLEN==64) begin
+          add_field("PMP12CFG", 8, WARL);
+          add_field("PMP13CFG", 8, WARL);
+          add_field("PMP14CFG", 8, WARL);
+          add_field("PMP15CFG", 8, WARL);
+        end
       end
       // Physical Memory Protection Configuration Register
       PMPCFG3: begin

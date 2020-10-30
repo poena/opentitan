@@ -3,26 +3,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 { name: "i2c"
-  clock_primary: "clk_fixed"
+  clock_primary: "clk_i"
   bus_device: "tlul"
   bus_host: "none"
   // INPUT pins
-  available_input_list: [
-    { name: "sda_rx", desc: "Serial input data bit" }
-    { name: "scl_rx", desc: "Serial input clock bit" }
-  ]
-  // OUTPUT pins
-  available_output_list: [
-    { name: "sda_tx", desc: "Serial output data bit" }
-    { name: "scl_tx", desc: "Serial output clock bit" }
+  available_inout_list: [
+    { name: "sda", desc: "Serial input data bit" }
+    { name: "scl", desc: "Serial input clock bit" }
   ]
   // INTERRUPT pins
   interrupt_list: [
     { name: "fmt_watermark"
-      desc: "raised when the FMT FIFO depth falls below the lowwater mark."
+      desc: "raised when the FMT FIFO depth falls below the low watermark."
     }
     { name: "rx_watermark"
-      desc: "raised if the RX FIFO is past the highwater mark."
+      desc: "raised if the RX FIFO is past the high watermark."
     }
     { name: "fmt_overflow"
       desc: "raised if the FMT FIFO has overflowed."
@@ -37,13 +32,31 @@
       desc: "raised if the SCL line drops early (not supported without clock synchronization)."
     }
     { name: "sda_interference"
-      desc: "raised if the SDA line goes low when master is trying to assert high"
+      desc: "raised if the SDA line goes low when host is trying to assert high"
     }
     { name: "stretch_timeout"
       desc: "raised if target stretches the clock beyond the allowed timeout period"
     }
     { name: "sda_unstable"
       desc: "raised if the target does not assert a constant value of SDA during transmission."
+    }
+    { name: "trans_complete"
+      desc: "raised if the host terminates the transaction by issuing STOP or repeated START."
+    }
+    { name: "tx_empty"
+      desc: "raised if the target needs data to transmit and TX FIFO is empty."
+    }
+    { name: "tx_nonempty"
+      desc: "raised if there are extra bytes left in TX FIFO at the end of a read."
+    }
+    { name: "tx_overflow"
+      desc: "raised if TX FIFO has overflowed."
+    }
+    { name: "acq_overflow"
+      desc: "raised if ACQ FIFO has overflowed."
+    }
+    { name: "ack_stop"
+      desc: "raised if STOP is received after ACK (host sends both signals)."
     }
   ]
 
@@ -60,7 +73,14 @@
           resval: "0"
           name: "ENABLEHOST"
           desc: '''
-	        Enable Host I2C functionality
+                Enable Host I2C functionality
+                '''
+        }
+        { bits: "1"
+          resval: "0"
+          name: "ENABLETARGET"
+          desc: '''
+                Enable Target I2C functionality
                 '''
         }
       ]
@@ -84,7 +104,7 @@
           desc: "FMT FIFO is empty"
           resval: "1"
         }
-	{ bits: "5"
+        { bits: "5"
           name: "RXEMPTY"
           desc: "RX FIFO is empty"
           resval: "1"
@@ -99,7 +119,27 @@
           desc: "Target functionality is idle. No Target transaction is in progress"
           resval: "1"
         }
+        { bits: "6"
+          name: "TXFULL"
+          desc: "TX FIFO is full"
+        }
+        { bits: "7"
+          name: "ACQFULL"
+          desc: "ACQ FIFO is full"
+        }
+        { bits: "8"
+          name: "TXEMPTY"
+          desc: "TX FIFO is empty"
+          resval: "1"
+        }
+        { bits: "9"
+          name: "ACQEMPTY"
+          desc: "ACQ FIFO is empty"
+          resval: "1"
+        }
       ]
+      tags: [// Updated by the hw. Exclude from write-checks.
+             "excl:CsrNonInitTests:CsrExclWriteCheck"]
     }
     { name: "RDATA"
       desc: "I2C read data"
@@ -110,6 +150,8 @@
       fields: [
         {bits: "7:0"}
       ]
+      tags: [// Updated by the hw. Exclude from init and write-checks.
+             "excl:CsrAllTests:CsrExclCheck"]
     }
     { name: "FDATA"
       desc: "I2C Format Data"
@@ -123,12 +165,12 @@
         }
         { bits: "8"
           name: "START"
-	  desc: "Issue a START condition before transmitting BYTE."
+          desc: "Issue a START condition before transmitting BYTE."
         }
         { bits: "9"
           name: "STOP"
           desc: "Issue a STOP condition after this operation"
-	}
+        }
         { bits: "10"
           name: "READ"
           desc: "Read BYTE bytes from I2C. (256 if BYTE==0)"
@@ -211,6 +253,16 @@
             }
           ]
         }
+        { bits: "7"
+          swaccess: "wo"
+          name: "ACQRST"
+          desc: "ACQ FIFO reset. Write 1 to the register resets it. Read returns 0"
+        }
+        { bits: "8"
+          swaccess: "wo"
+          name: "TXRST"
+          desc: "TX FIFO reset. Write 1 to the register resets it. Read returns 0"
+        }
       ]
     }
     { name: "FIFO_STATUS"
@@ -227,7 +279,17 @@
           name: "RXLVL"
           desc: "Current fill level of RX fifo"
         }
+        { bits: "13:8"
+          name: "TXLVL"
+          desc: "Current fill level of TX fifo"
+        }
+        { bits: "29:24"
+          name: "ACQLVL"
+          desc: "Current fill level of ACQ fifo"
+        }
       ]
+      tags: [// Updated by the hw. Exclude from write-checks.
+             "excl:CsrNonInitTests:CsrExclWriteCheck"]
     }
     { name: "OVRD"
       desc: "I2C override control register"
@@ -267,6 +329,8 @@
                 '''
         }
       ]
+      tags: [// Affected by IO pins - exclude from init and write checks.
+             "excl:CsrAllTests:CsrExclCheck"]
     }
 
     { name: "TIMING0"
@@ -375,6 +439,58 @@
           name: "EN"
           desc: "Enable timeout feature"
         }
+      ]
+    }
+    { name: "TARGET_ID"
+      desc: "I2C target address and mask pairs"
+      swaccess: "rw"
+      hwaccess: "hro"
+      fields: [
+        { bits: "6:0"
+          name: "ADDRESS0"
+          desc: "I2C target address number 0"
+        }
+        { bits: "13:7"
+          name: "MASK0"
+          desc: "I2C target mask number 0"
+        }
+        { bits: "20:14"
+          name: "ADDRESS1"
+          desc: "I2C target address number 1"
+        }
+        { bits: "27:21"
+          name: "MASK1"
+          desc: "I2C target mask number 1"
+        }
+      ]
+    }
+    { name: "ACQDATA"
+      desc: "I2C target acquired data"
+      swaccess: "ro"
+      hwaccess: "hrw"
+      hwext: "true"
+      hwre: "true"
+      fields: [
+        { bits: "7:0"
+          name: "ABYTE"
+          desc: "Address for accepted transaction or acquired byte"
+        }
+        { bits: "9:8"
+          name: "SIGNAL"
+          desc: "Host issued a START before transmitting ABYTE, a STOP or a RESTART after the preceeding ABYTE"
+        }
+      ]
+      tags: [// Updated by the hw. Exclude from init and write-checks.
+             // Without actual I2C traffic, read from this FIFO returns Xs.
+             "excl:CsrAllTests:CsrExclCheck"]
+    }
+    { name: "TXDATA"
+      desc: "I2C target transmit data"
+      swaccess: "wo"
+      hwaccess: "hro"
+      hwqe: "true"
+      fields: [
+        { bits: "7:0" }
       ]
     }
   ]

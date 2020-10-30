@@ -3,13 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // basic sanity test vseq
-class i2c_sanity_vseq extends i2c_base_vseq;
+class i2c_sanity_vseq extends i2c_rx_tx_vseq;
   `uvm_object_utils(i2c_sanity_vseq)
-
   `uvm_object_new
 
-  task body();
-    `uvm_error(`gfn, "FIXME")
-  endtask : body
+  // increase num_trans to cover all transaction types
+  constraint num_trans_c { num_trans inside {[50 : 100]}; }
 
 endclass : i2c_sanity_vseq

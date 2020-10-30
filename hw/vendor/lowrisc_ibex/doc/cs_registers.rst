@@ -46,6 +46,18 @@ Ibex implements all the Control and Status Registers (CSRs) listed in the follow
 +---------+--------------------+--------+-----------------------------------------------+
 |  0x3BF  | ``pmpaddr15``      | WARL   | PMP Address Register                          |
 +---------+--------------------+--------+-----------------------------------------------+
+|  0x7A0  | ``tselect``        | WARL   | Trigger Select Register                       |
++---------+--------------------+--------+-----------------------------------------------+
+|  0x7A1  | ``tdata1``         | WARL   | Trigger Data Register 1                       |
++---------+--------------------+--------+-----------------------------------------------+
+|  0x7A2  | ``tdata2``         | WARL   | Trigger Data Register 2                       |
++---------+--------------------+--------+-----------------------------------------------+
+|  0x7A3  | ``tdata3``         | WARL   | Trigger Data Register 3                       |
++---------+--------------------+--------+-----------------------------------------------+
+|  0x7A8  | ``mcontext``       | WARL   | Machine Context Register                      |
++---------+--------------------+--------+-----------------------------------------------+
+|  0x7AA  | ``scontext``       | WARL   | Supervisor Context Register                   |
++---------+--------------------+--------+-----------------------------------------------+
 |  0x7B0  | ``dcsr``           | WARL   | Debug Control and Status Register             |
 +---------+--------------------+--------+-----------------------------------------------+
 |  0x7B1  | ``dpc``            | RW     | Debug PC                                      |
@@ -53,6 +65,10 @@ Ibex implements all the Control and Status Registers (CSRs) listed in the follow
 |  0x7B2  | ``dscratch0``      | RW     | Debug Scratch Register 0                      |
 +---------+--------------------+--------+-----------------------------------------------+
 |  0x7B3  | ``dscratch1``      | RW     | Debug Scratch Register 1                      |
++---------+--------------------+--------+-----------------------------------------------+
+|  0x7C0  | ``cpuctrl``        | WARL   | CPU Control Register (Custom CSR)             |
++---------+--------------------+--------+-----------------------------------------------+
+|  0x7C1  | ``secureseed``     | WARL   | Security feature random seed (Custom CSR)     |
 +---------+--------------------+--------+-----------------------------------------------+
 |  0xB00  | ``mcycle``         | RW     | Machine Cycle Counter                         |
 +---------+--------------------+--------+-----------------------------------------------+
@@ -282,6 +298,122 @@ Reset Value: ``0x0000_0000``
 | address[33:2]  |
 +----------------+
 
+.. _csr-tselect:
+
+Trigger Select Register (tselect)
+---------------------------------
+
+CSR Address: ``0x7A0``
+
+Reset Value: ``0x0000_0000``
+
+Accessible in Debug Mode or M-Mode when trigger support is enabled (using the DbgTriggerEn parameter).
+
+Ibex implements a single trigger, therefore this register will always read as zero.
+
+.. _csr-tdata1:
+
+Trigger Data Register 1 (tdata1)
+--------------------------------
+
+CSR Address: ``0x7A1``
+
+Reset Value: ``0x2800_1000``
+
+Accessible in Debug Mode or M-Mode when trigger support is enabled (using the DbgTriggerEn parameter).
+Since native triggers are not supported, writes to this register from M-Mode will be ignored.
+
+Ibex only implements one type of trigger, instruction address match.
+Most fields of this register will read as a fixed value to reflect the mode that is supported.
+
++-------+------+------------------------------------------------------------------+
+| Bit#  | R/W  | Description                                                      |
++-------+------+------------------------------------------------------------------+
+| 31:28 | R    | **type:** 2 = Address/Data match trigger type.                   |
++-------+------+------------------------------------------------------------------+
+| 27    | R    | **dmode:** 1 = Only debug mode can write tdata registers         |
++-------+------+------------------------------------------------------------------+
+| 26:21 | R    | **maskmax:** 0 = Only exact matching supported.                  |
++-------+------+------------------------------------------------------------------+
+| 20    | R    | **hit:** 0 = Hit indication not supported.                       |
++-------+------+------------------------------------------------------------------+
+| 19    | R    | **select:** 0 = Only address matching is supported.              |
++-------+------+------------------------------------------------------------------+
+| 18    | R    | **timing:** 0 = Break before the instruction at the specified    |
+|       |      | address.                                                         |
++-------+------+------------------------------------------------------------------+
+| 17:16 | R    | **sizelo:** 0 = Match accesses of any size.                      |
++-------+------+------------------------------------------------------------------+
+| 15:12 | R    | **action:** 1 = Enter debug mode on match.                       |
++-------+------+------------------------------------------------------------------+
+| 11    | R    | **chain:** 0 = Chaining not supported.                           |
++-------+------+------------------------------------------------------------------+
+| 10:7  | R    | **match:** 0 = Match the whole address.                          |
++-------+------+------------------------------------------------------------------+
+| 6     | R    | **m:** 1 = Match in M-Mode.                                      |
++-------+------+------------------------------------------------------------------+
+| 5     | R    | zero.                                                            |
++-------+------+------------------------------------------------------------------+
+| 4     | R    | **s:** 0 = S-Mode not supported.                                 |
++-------+------+------------------------------------------------------------------+
+| 3     | R    | **u:** 1 = Match in U-Mode.                                      |
++-------+------+------------------------------------------------------------------+
+| 2     | RW   | **execute:** Enable matching on instruction address.             |
++-------+------+------------------------------------------------------------------+
+| 1     | R    | **store:** 0 = Store address / data matching not supported.      |
++-------+------+------------------------------------------------------------------+
+| 0     | R    | **load:** 0 = Load address / data matching not supported.        |
++-------+------+------------------------------------------------------------------+
+
+Details of these configuration bits can be found in the RISC-V Debug Specification, version 0.13.2 (see Trigger Registers, Section 5.2).
+
+.. _csr-tdata2:
+
+Trigger Data Register 2 (tdata2)
+--------------------------------
+
+CSR Address: ``0x7A2``
+
+Reset Value: ``0x0000_0000``
+
+Accessible in Debug Mode or M-Mode when trigger support is enabled (using the DbgTriggerEn parameter).
+Since native triggers are not supported, writes to this register from M-Mode will be ignored.
+
+This register stores the instruction address to match against for a breakpoint trigger.
+
+Trigger Data Register 3 (tdata3)
+--------------------------------
+
+CSR Address: ``0x7A3``
+
+Reset Value: ``0x0000_0000``
+
+Accessible in Debug Mode or M-Mode when trigger support is enabled (using the DbgTriggerEn parameter).
+
+Ibex does not support the features requiring this register, so writes are ignored and it will always read as zero.
+
+Machine Context Register (mcontext)
+-----------------------------------
+
+CSR Address: ``0x7A8``
+
+Reset Value: ``0x0000_0000``
+
+Accessible in Debug Mode or M-Mode when trigger support is enabled (using the DbgTriggerEn parameter).
+
+Ibex does not support the features requiring this register, so writes are ignored and it will always read as zero.
+
+Supervisor Context Register (scontext)
+--------------------------------------
+
+CSR Address: ``0x7AA``
+
+Reset Value: ``0x0000_0000``
+
+Accessible in Debug Mode or M-Mode when trigger support is enabled (using the DbgTriggerEn parameter).
+
+Ibex does not support the features requiring this register, so writes are ignored and it will always read as zero.
+
 .. _csr-dcsr:
 
 Debug Control and Status Register (dcsr)
@@ -306,7 +438,7 @@ Other bit fields read as zero.
 | 12    | WARL | **ebreaku:** EBREAK in U-Mode behaves as described in Privileged |
 |       |      | Spec (0), or enters Debug Mode (1).                              |
 +-------+------+------------------------------------------------------------------+
-| 8:6   | R    | **cause:** 1 = EBREAK, 3 = halt request, 4 = step                |
+| 8:6   | R    | **cause:** 1 = EBREAK, 2 = trigger, 3 = halt request, 4 = step   |
 +-------+------+------------------------------------------------------------------+
 | 2     | RW   | **step:** When set and not in Debug Mode, execute a single       |
 |       |      | instruction and enter Debug Mode.                                |
@@ -354,6 +486,55 @@ Reset Value: ``0x0000_0000``
 
 Scratch register to be used by the debug module.
 Accessible in Debug Mode only.
+
+CPU Control Register (cpuctrl)
+------------------------------
+
+CSR Address: ``0x7C0``
+
+Reset Value: ``0x0000_0000``
+
+Custom CSR to control runtime configuration of CPU components.
+Accessible in Machine Mode only.
+Ibex implements the following bit fields.
+Other bit fields read as zero.
+
++-------+------+------------------------------------------------------------------+
+| Bit#  | R/W  | Description                                                      |
++-------+------+------------------------------------------------------------------+
+| 5:3   | WARL | **dummy_instr_mask:** Mask to control frequency of dummy         |
+|       |      | instruction insertion. If the core has not been configured with  |
+|       |      | security features (SecureIbex parameter == 0), this field will   |
+|       |      | always read as zero (see :ref:`security`).                       |
++-------+------+------------------------------------------------------------------+
+| 2     | WARL | **dummy_instr_en:** Enable (1) or disable (0) dummy instruction  |
+|       |      | insertion features. If the core has not been configured with     |
+|       |      | security features (SecureIbex parameter == 0), this field will   |
+|       |      | always read as zero (see :ref:`security`).                       |
++-------+------+------------------------------------------------------------------+
+| 1     | WARL | **data_ind_timing:** Enable (1) or disable (0) data-independent  |
+|       |      | timing features. If the core has not been configured with        |
+|       |      | security features (SecureIbex parameter == 0), this field will   |
+|       |      | always read as zero.                                             |
++-------+------+------------------------------------------------------------------+
+| 0     | WARL | **icache_enable:** Enable (1) or disable (0) the instruction     |
+|       |      | cache. If the instruction cache has not been configured (ICache  |
+|       |      | parameter == 0), this field will always read as zero.            |
++-------+------+------------------------------------------------------------------+
+
+Security Feature Seed Register (secureseed)
+-------------------------------------------
+
+CSR Address: ``0x7C1``
+
+Reset Value: ``0x0000_0000``
+
+Accessible in Machine Mode only.
+
+Custom CSR to allow re-seeding of security-related pseudo-random number generators.
+A write to this register will update the seeding of pseudo-random number generators inside the design.
+This allows software to improve the randomness, and therefore security, of certain features by periodically reading from a true random number generator peripheral.
+Seed values are not actually stored in a register and so reads to this register will always return zero.
 
 Time Registers (time(h))
 ------------------------

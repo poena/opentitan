@@ -1,10 +1,11 @@
 $white: #fff;
+$black: #1D0037;
 $dark-purple: #3D1067;
 $medium-purple: #68688B;
 $blue: #1683B5;
 
 $max-width-xl: 90rem;
-$max-width-l: 79.25rem;
+$max-width-l: 99.25rem;
 $max-width-m: 65.75rem;
 $max-width-s: 52rem;
 $m-s: calc(1em + 1vw);
@@ -22,7 +23,7 @@ $m-s: calc(1em + 1vw);
   --rainbow-light: linear-gradient(90deg, #4BC0C8 0%, #C779D0 50%, #FEAC5E 100%);
   --rainbow-dark: linear-gradient(90deg, rgba(29,0,55,0.4),  rgba(29,0,55,0.4) 100%), linear-gradient(90deg, #4BC0C8 0%, #C779D0 50%, #FEAC5E 100%);
   --text-third: #1683B5;
-  
+
   --background: var(--white);
   --text-color: var(--black);
   --text-second: var(--medium-purple);
@@ -47,9 +48,9 @@ $m-s: calc(1em + 1vw);
     .intro {
       background-image: url(../img/dark/bg-intro.svg);
     }
-  
+
     .cta {
-      background-image: 
+      background-image:
         url('../img/dark/quote-top.svg'),
         url('../img/dark/quote-bottom.svg');
     }
@@ -75,7 +76,7 @@ $m-s: calc(1em + 1vw);
   }
 
   .cta {
-    background-image: 
+    background-image:
       url('../img/dark/quote-top.svg'),
       url('../img/dark/quote-bottom.svg');
   }

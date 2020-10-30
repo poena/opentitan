@@ -16,6 +16,7 @@ class hmac_stress_all_vseq extends hmac_base_vseq;
                           "hmac_common_vseq", // for intr_test
                           "hmac_datapath_stress_vseq",
                           "hmac_long_msg_vseq",
+                          "hmac_error_vseq",
                           "hmac_test_vectors_sha_vseq",
                           "hmac_test_vectors_hmac_vseq"};
     for (int i = 1; i <= num_trans; i++) begin
@@ -36,8 +37,7 @@ class hmac_stress_all_vseq extends hmac_base_vseq;
       if (seq_names[seq_idx] == "hmac_common_vseq") begin
         hmac_common_vseq common_vseq;
         `downcast(common_vseq, hmac_vseq)
-        if ($urandom_range(0, 1)) common_vseq.common_seq_type = "intr_test";
-        else common_vseq.common_seq_type = "tl_errors";
+        common_vseq.common_seq_type = "intr_test";
       end
       hmac_vseq.start(p_sequencer);
     end

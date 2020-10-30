@@ -17,16 +17,14 @@ class uart_env_cfg extends cip_base_env_cfg #(.RAL_T(uart_reg_block));
 
   `uvm_object_new
 
-  virtual function void initialize_csr_addr_map_size();
-    this.csr_addr_map_size = UART_ADDR_MAP_SIZE;
-  endfunction : initialize_csr_addr_map_size
-
   virtual function void initialize(bit [TL_AW-1:0] csr_base_addr = '1);
     super.initialize(csr_base_addr);
     // create uart agent config obj
     m_uart_agent_cfg = uart_agent_cfg::type_id::create("m_uart_agent_cfg");
     // set num_interrupts & num_alerts which will be used to create coverage and more
     num_interrupts = ral.intr_state.get_n_used_bits();
+    // only support 1 outstanding TL item
+    m_tl_agent_cfg.max_outstanding_req = 1;
   endfunction
 
   // uart doesn't have reset pin. When reset occurs/clears,

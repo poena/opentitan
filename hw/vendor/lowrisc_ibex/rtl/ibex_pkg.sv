@@ -8,6 +8,28 @@
  */
 package ibex_pkg;
 
+/////////////////////
+// Parameter Enums //
+/////////////////////
+
+typedef enum integer {
+  RegFileFF    = 0,
+  RegFileFPGA  = 1,
+  RegFileLatch = 2
+} regfile_e;
+
+typedef enum integer {
+  RV32MNone        = 0,
+  RV32MSlow        = 1,
+  RV32MFast        = 2,
+  RV32MSingleCycle = 3
+} rv32m_e;
+
+typedef enum integer {
+  RV32BNone     = 0,
+  RV32BBalanced = 1,
+  RV32BFull     = 2
+} rv32b_e;
 
 /////////////
 // Opcodes //
@@ -32,7 +54,7 @@ typedef enum logic [6:0] {
 // ALU operations //
 ////////////////////
 
-typedef enum logic [4:0] {
+typedef enum logic [5:0] {
   // Arithmetics
   ALU_ADD,
   ALU_SUB,
@@ -41,11 +63,24 @@ typedef enum logic [4:0] {
   ALU_XOR,
   ALU_OR,
   ALU_AND,
+  // RV32B
+  ALU_XNOR,
+  ALU_ORN,
+  ALU_ANDN,
 
   // Shifts
   ALU_SRA,
   ALU_SRL,
   ALU_SLL,
+  // RV32B
+  ALU_SRO,
+  ALU_SLO,
+  ALU_ROR,
+  ALU_ROL,
+  ALU_GREV,
+  ALU_GORC,
+  ALU_SHFL,
+  ALU_UNSHFL,
 
   // Comparisons
   ALU_LT,
@@ -54,10 +89,69 @@ typedef enum logic [4:0] {
   ALU_GEU,
   ALU_EQ,
   ALU_NE,
+  // RV32B
+  ALU_MIN,
+  ALU_MINU,
+  ALU_MAX,
+  ALU_MAXU,
+
+  // Pack
+  // RV32B
+  ALU_PACK,
+  ALU_PACKU,
+  ALU_PACKH,
+
+  // Sign-Extend
+  // RV32B
+  ALU_SEXTB,
+  ALU_SEXTH,
+
+  // Bitcounting
+  // RV32B
+  ALU_CLZ,
+  ALU_CTZ,
+  ALU_PCNT,
 
   // Set lower than
   ALU_SLT,
-  ALU_SLTU
+  ALU_SLTU,
+
+  // Ternary Bitmanip Operations
+  // RV32B
+  ALU_CMOV,
+  ALU_CMIX,
+  ALU_FSL,
+  ALU_FSR,
+
+  // Single-Bit Operations
+  // RV32B
+  ALU_SBSET,
+  ALU_SBCLR,
+  ALU_SBINV,
+  ALU_SBEXT,
+
+  // Bit Extract / Deposit
+  // RV32B
+  ALU_BEXT,
+  ALU_BDEP,
+
+  // Bit Field Place
+  // RV32B
+  ALU_BFP,
+
+  // Carry-less Multiply
+  // RV32B
+  ALU_CLMUL,
+  ALU_CLMULR,
+  ALU_CLMULH,
+
+  // Cyclic Redundancy Check
+  ALU_CRC32_B,
+  ALU_CRC32C_B,
+  ALU_CRC32_H,
+  ALU_CRC32C_H,
+  ALU_CRC32_W,
+  ALU_CRC32C_W
 } alu_op_e;
 
 typedef enum logic [1:0] {
@@ -96,6 +190,16 @@ typedef enum logic[3:0] {
    XDEBUGVER_NONSTD = 4'd15 // debug not conforming to RISC-V debug spec
 } x_debug_ver_e;
 
+//////////////
+// WB stage //
+//////////////
+
+// Type of instruction present in writeback stage
+typedef enum logic[1:0] {
+  WB_INSTR_LOAD,  // Instruction is awaiting load data
+  WB_INSTR_STORE, // Instruction is awaiting store response
+  WB_INSTR_OTHER  // Instruction doesn't fit into above categories
+} wb_instr_type_e;
 
 //////////////
 // ID stage //
@@ -133,8 +237,7 @@ typedef enum logic [2:0] {
 } imm_b_sel_e;
 
 // Regfile write data selection
-typedef enum logic [1:0] {
-  RF_WD_LSU,
+typedef enum logic {
   RF_WD_EX,
   RF_WD_CSR
 } rf_wd_sel_e;
@@ -149,7 +252,8 @@ typedef enum logic [2:0] {
   PC_JUMP,
   PC_EXC,
   PC_ERET,
-  PC_DRET
+  PC_DRET,
+  PC_BP
 } pc_sel_e;
 
 // Exception PC mux selection
@@ -159,6 +263,15 @@ typedef enum logic [1:0] {
   EXC_PC_DBD,
   EXC_PC_DBG_EXC // Exception while in debug mode
 } exc_pc_sel_e;
+
+// Interrupt requests
+typedef struct packed {
+  logic        irq_software;
+  logic        irq_timer;
+  logic        irq_external;
+  logic [14:0] irq_fast; // 15 fast interrupts,
+                         // one interrupt is reserved for NMI (not visible through mip/mie)
+} irqs_t;
 
 // Exception cause
 typedef enum logic [5:0] {
@@ -256,6 +369,14 @@ typedef enum logic[11:0] {
   CSR_PMPADDR13 = 12'h3BD,
   CSR_PMPADDR14 = 12'h3BE,
   CSR_PMPADDR15 = 12'h3BF,
+
+  // Debug trigger
+  CSR_TSELECT   = 12'h7A0,
+  CSR_TDATA1    = 12'h7A1,
+  CSR_TDATA2    = 12'h7A2,
+  CSR_TDATA3    = 12'h7A3,
+  CSR_MCONTEXT  = 12'h7A8,
+  CSR_SCONTEXT  = 12'h7AA,
 
   // Debug/trace
   CSR_DCSR      = 12'h7b0,
@@ -357,7 +478,9 @@ typedef enum logic[11:0] {
   CSR_MHPMCOUNTER28H = 12'hB9C,
   CSR_MHPMCOUNTER29H = 12'hB9D,
   CSR_MHPMCOUNTER30H = 12'hB9E,
-  CSR_MHPMCOUNTER31H = 12'hB9F
+  CSR_MHPMCOUNTER31H = 12'hB9F,
+  CSR_CPUCTRL        = 12'h7C0,
+  CSR_SECURESEED     = 12'h7C1
 } csr_num_e;
 
 // CSR pmp-related offsets
@@ -371,6 +494,9 @@ parameter int unsigned CSR_MSTATUS_MPP_BIT_LOW  = 11;
 parameter int unsigned CSR_MSTATUS_MPP_BIT_HIGH = 12;
 parameter int unsigned CSR_MSTATUS_MPRV_BIT     = 17;
 parameter int unsigned CSR_MSTATUS_TW_BIT       = 21;
+
+// CSR machine ISA
+parameter logic [1:0] CSR_MISA_MXL = 2'd1; // M-XLEN: XLEN in M-Mode for RV32
 
 // CSR interrupt pending/enable bits
 parameter int unsigned CSR_MSIX_BIT      = 3;

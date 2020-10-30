@@ -2,156 +2,210 @@
 // Licensed under the Apache License, Version 2.0, see LICENSE for details.
 // SPDX-License-Identifier: Apache-2.0
 
-#include "sw/device/lib/common.h"
-#include "sw/device/lib/gpio.h"
-#include "sw/device/lib/uart.h"
+#include <stdalign.h>
+#include <stdbool.h>
+
+#include "sw/device/examples/demos.h"
+#include "sw/device/lib/arch/device.h"
+#include "sw/device/lib/dif/dif_gpio.h"
+#include "sw/device/lib/dif/dif_spi_device.h"
+#include "sw/device/lib/dif/dif_uart.h"
+#include "sw/device/lib/pinmux.h"
+#include "sw/device/lib/runtime/hart.h"
+#include "sw/device/lib/runtime/log.h"
+#include "sw/device/lib/runtime/print.h"
+#include "sw/device/lib/testing/check.h"
 #include "sw/device/lib/usb_controlep.h"
 #include "sw/device/lib/usb_simpleserial.h"
 #include "sw/device/lib/usbdev.h"
 
+#include "hw/top_earlgrey/sw/autogen/top_earlgrey.h"  // Generated.
+
 // These just for the '/' printout
-#define USBDEV_BASE_ADDR 0x40020000
+#define USBDEV_BASE_ADDR 0x40150000
 #include "usbdev_regs.h"  // Generated.
 
-// Build Configuration descriptor array
-static uint8_t cfg_dscr[] = {
-    USB_CFG_DSCR_HEAD(
-        USB_CFG_DSCR_LEN + 2 * (USB_INTERFACE_DSCR_LEN + 2 * USB_EP_DSCR_LEN),
-        2) VEND_INTERFACE_DSCR(0, 2, 0x50, 1) USB_BULK_EP_DSCR(0, 1, 32, 0)
-        USB_BULK_EP_DSCR(1, 1, 32, 4) VEND_INTERFACE_DSCR(1, 2, 0x50, 1)
-            USB_BULK_EP_DSCR(0, 2, 32, 0) USB_BULK_EP_DSCR(1, 2, 32, 4)};
-// The array above may not end aligned on a 4-byte boundary
-// and is probably at the end of the initialized data section
-// Conversion to srec needs this to be aligned so force it by
-// initializing an int32 (volatile else it is not used and can go away)
-static volatile int32_t sdata_align = 42;
-
-/* context areas */
-static usbdev_ctx_t usbdev_ctx;
-static usb_controlep_ctx_t control_ctx;
-static usb_ss_ctx_t ss_ctx[2];
+#define REG32(add) *((volatile uint32_t *)(add))
 
 /**
- * Delay loop executing within 8 cycles on ibex
+ * Configuration values for USB.
  */
-static void delay_loop_ibex(unsigned long loops) {
-  int out; /* only to notify compiler of modifications to |loops| */
-  asm volatile(
-      "1: nop             \n"  // 1 cycle
-      "   nop             \n"  // 1 cycle
-      "   nop             \n"  // 1 cycle
-      "   nop             \n"  // 1 cycle
-      "   addi %1, %1, -1 \n"  // 1 cycle
-      "   bnez %1, 1b     \n"  // 3 cycles
-      : "=&r"(out)
-      : "0"(loops));
+static uint8_t config_descriptors[] = {
+    USB_CFG_DSCR_HEAD(
+        USB_CFG_DSCR_LEN + 2 * (USB_INTERFACE_DSCR_LEN + 2 * USB_EP_DSCR_LEN),
+        2),
+    VEND_INTERFACE_DSCR(0, 2, 0x50, 1), USB_BULK_EP_DSCR(0, 1, 32, 0),
+    USB_BULK_EP_DSCR(1, 1, 32, 4), VEND_INTERFACE_DSCR(1, 2, 0x50, 1),
+    USB_BULK_EP_DSCR(0, 2, 32, 0), USB_BULK_EP_DSCR(1, 2, 32, 4),
+};
+
+/**
+ * USB device context types.
+ */
+static usbdev_ctx_t usbdev;
+static usb_controlep_ctx_t usbdev_control;
+static usb_ss_ctx_t simple_serial0;
+static usb_ss_ctx_t simple_serial1;
+
+/**
+ * Makes `c` into a printable character, replacing it with `replacement`
+ * as necessary.
+ */
+static char make_printable(char c, char replacement) {
+  if (c == 0xa || c == 0xd) {
+    return c;
+  }
+
+  if (c < ' ' || c > '~') {
+    c = replacement;
+  }
+  return c;
 }
 
-static int usleep_ibex(unsigned long usec) {
-  unsigned long usec_cycles;
-  usec_cycles = CLK_FIXED_FREQ_HZ * usec / 1000 / 1000 / 8;
+static const size_t kExpectedUsbCharsRecved = 6;
+static size_t usb_chars_recved_total;
 
-  delay_loop_ibex(usec_cycles);
-  return 0;
+static dif_gpio_t gpio;
+static dif_spi_device_t spi;
+static dif_uart_t uart;
+
+/**
+ * Callbacks for processing USB reciept. The latter increments the
+ * recieved character by one, to make them distinct.
+ */
+static void usb_receipt_callback_0(uint8_t c) {
+  c = make_printable(c, '?');
+  CHECK(dif_uart_byte_send_polled(&uart, c) == kDifUartOk);
+  ++usb_chars_recved_total;
+}
+static void usb_receipt_callback_1(uint8_t c) {
+  c = make_printable(c + 1, '?');
+  CHECK(dif_uart_byte_send_polled(&uart, c) == kDifUartOk);
+  ++usb_chars_recved_total;
 }
 
-static int usleep(unsigned long usec) { return usleep_ibex(usec); }
-
-static void test_error(void) {
-  while (1) {
-    gpio_write_all(0xAA00);  // pattern
-    usleep(200 * 1000);
-    gpio_write_all(0x5500);  // pattern
-    usleep(100 * 1000);
+/**
+ * USB Send String
+ *
+ * Send a 0 terminated string to the USB one byte at a time.
+ * The send byte code will flush the endpoint if needed.
+ *
+ * @param string Zero terminated string to send.
+ * @param ss_ctx Pointer to simple string endpoint context to send through.
+ */
+static void usb_send_str(const char *string, usb_ss_ctx_t *ss_ctx) {
+  for (int i = 0; string[i] != 0; ++i) {
+    usb_simpleserial_send_byte(ss_ctx, string[i]);
   }
 }
 
-// Override default handler routines
-void handler_instr_ill_fault(void) {
-  uart_send_str("Instruction Illegal fault");
-  test_error();
-}
-
-// Override default handler routines
-void handler_lsu_fault(void) {
-  uart_send_str("Load/Store Fault");
-  test_error();
-}
-
-#define MK_PRINT(c) \
-  (((c != 0xa) && (c != 0xd) && ((c < 32) || (c > 126))) ? '_' : c)
-
-/* Inbound USB characters get printed to the UART via these callbacks */
-/* Not ideal because the UART is slower */
-static void serial_rx0(uint8_t c) { uart_send_char(MK_PRINT(c)); }
-/* Add one to rx character so you can tell it is the second instance */
-static void serial_rx1(uint8_t c) { uart_send_char(MK_PRINT(c + 1)); }
+// These GPIO bits control USB PHY configuration
+static const uint32_t kPinflipMask = 1;
+static const uint32_t kDiffMask = 2;
 
 int main(int argc, char **argv) {
-  uart_init(UART_BAUD_RATE);
+  CHECK(dif_uart_init(
+            (dif_uart_params_t){
+                .base_addr = mmio_region_from_addr(TOP_EARLGREY_UART_BASE_ADDR),
+            },
+            &uart) == kDifUartOk);
+  CHECK(dif_uart_configure(&uart, (dif_uart_config_t){
+                                      .baudrate = kUartBaudrate,
+                                      .clk_freq_hz = kClockFreqPeripheralHz,
+                                      .parity_enable = kDifUartToggleDisabled,
+                                      .parity = kDifUartParityEven,
+                                  }) == kDifUartConfigOk);
+  base_uart_stdout(&uart);
 
-  // Enable GPIO: 0-7 and 16 is input, 8-15 is output
-  gpio_init(0xFF00);
+  pinmux_init();
 
-  // Add DATE and TIME because I keep fooling myself with old versions
-  uart_send_str(
-      "Hello USB! "__DATE__
-      " "__TIME__
-      "\r\n");
-  uart_send_str("Characters from UART go to USB and GPIO\r\n");
-  uart_send_str("Characters from USB go to UART\r\n");
+  CHECK(dif_spi_device_init(
+            (dif_spi_device_params_t){
+                .base_addr = mmio_region_from_addr(0x40020000),
+            },
+            &spi) == kDifSpiDeviceOk);
+  CHECK(dif_spi_device_configure(
+            &spi, (dif_spi_device_config_t){
+                      .clock_polarity = kDifSpiDeviceEdgePositive,
+                      .data_phase = kDifSpiDeviceEdgeNegative,
+                      .tx_order = kDifSpiDeviceBitOrderMsbToLsb,
+                      .rx_order = kDifSpiDeviceBitOrderMsbToLsb,
+                      .rx_fifo_timeout = 63,
+                      .rx_fifo_len = kDifSpiDeviceBufferLen / 2,
+                      .tx_fifo_len = kDifSpiDeviceBufferLen / 2,
+                  }) == kDifSpiDeviceOk);
 
-  // Give a LED pattern as startup indicator for 5 seconds
-  gpio_write_all(0xAA00);  // pattern
-  usleep(1000);
-  gpio_write_all(0x5500);  // pattern
-  // usbdev_init here so dpi code will not start until simulation
-  // got through all the printing (which takes a while if --trace)
-  usbdev_init(&usbdev_ctx);
-  usb_controlep_init(&control_ctx, &usbdev_ctx, 0, cfg_dscr, sizeof(cfg_dscr));
-  usb_simpleserial_init(&ss_ctx[0], &usbdev_ctx, 1, serial_rx0);
-  usb_simpleserial_init(&ss_ctx[1], &usbdev_ctx, 2, serial_rx1);
+  dif_gpio_params_t gpio_params = {
+      .base_addr = mmio_region_from_addr(0x40010000),
+  };
+  CHECK(dif_gpio_init(gpio_params, &gpio) == kDifGpioOk);
+  // Enable GPIO: 0-7 and 16 is input; 8-15 is output.
+  CHECK(dif_gpio_output_set_enabled_all(&gpio, 0x0ff00) == kDifGpioOk);
 
-  uint32_t gpio_in;
-  uint32_t gpio_in_prev = 0;
-  uint32_t gpio_in_changes;
+  LOG_INFO("Hello, USB!");
+  LOG_INFO("Built at: " __DATE__ ", " __TIME__);
 
-  while (1) {
-    usbdev_poll(&usbdev_ctx);
-    // report changed switches over UART
-    gpio_in = gpio_read() & 0x100FF;  // 0-7 is switch input, 16 is FTDI
-    gpio_in_changes = (gpio_in & ~gpio_in_prev) | (~gpio_in & gpio_in_prev);
-    for (int b = 0; b < 8; b++) {
-      if (gpio_in_changes & (1 << b)) {
-        int val_now = (gpio_in >> b) & 0x01;
-        uart_send_str("GPIO: Switch ");
-        uart_send_char(b + 48);
-        uart_send_str(" changed to ");
-        uart_send_char(val_now + 48);
-        uart_send_str("\r\n");
+  demo_gpio_startup(&gpio);
+
+  // Call `usbdev_init` here so that DPI will not start until the
+  // simulation has finished all of the printing, which takes a while
+  // if `--trace` was passed in.
+  uint32_t gpio_state;
+  CHECK(dif_gpio_read_all(&gpio, &gpio_state) == kDifGpioOk);
+  bool pinflip = gpio_state & kPinflipMask ? true : false;
+  bool differential = gpio_state & kDiffMask ? true : false;
+  LOG_INFO("PHY settings: pinflip=%d differential=%d", pinflip, differential);
+  usbdev_init(&usbdev, pinflip, differential, differential);
+
+  usb_controlep_init(&usbdev_control, &usbdev, 0, config_descriptors,
+                     sizeof(config_descriptors));
+  usb_simpleserial_init(&simple_serial0, &usbdev, 1, usb_receipt_callback_0);
+  usb_simpleserial_init(&simple_serial1, &usbdev, 2, usb_receipt_callback_1);
+
+  CHECK(dif_spi_device_send(&spi, "SPI!", 4, /*bytes_sent=*/NULL) ==
+        kDifSpiDeviceOk);
+
+  bool say_hello = true;
+  bool pass_signaled = false;
+  while (true) {
+    usbdev_poll(&usbdev);
+
+    gpio_state = demo_gpio_to_log_echo(&gpio, gpio_state);
+    demo_spi_to_log_echo(&spi);
+
+    while (true) {
+      size_t chars_available;
+      if (dif_uart_rx_bytes_available(&uart, &chars_available) != kDifUartOk ||
+          chars_available == 0) {
+        break;
       }
-    }
-    if (gpio_in_changes & 0x10000) {
-      uart_send_str("FTDI control changed. Enable ");
-      uart_send_str((gpio_in & 0x10000) ? "JTAG\r\n" : "SPI\r\n");
-    }
-    gpio_in_prev = gpio_in;
 
-    // UART echo
-    char rcv_char;
-    while (uart_rcv_char(&rcv_char) != -1) {
-      uart_send_char(rcv_char);
+      uint8_t rcv_char;
+      CHECK(dif_uart_bytes_receive(&uart, 1, &rcv_char, NULL) == kDifUartOk);
+      CHECK(dif_uart_byte_send_polled(&uart, rcv_char) == kDifUartOk);
+
+      CHECK(dif_gpio_write_all(&gpio, rcv_char << 8) == kDifGpioOk);
+
       if (rcv_char == '/') {
-        uart_send_char('I');
-        uart_send_uint(REG32(USBDEV_INTR_STATE()), 12);
-        uart_send_char('-');
-        uart_send_uint(REG32(USBDEV_USBSTAT()), 32);
-        uart_send_char(' ');
+        uint32_t usb_irq_state =
+            REG32(USBDEV_BASE_ADDR + USBDEV_INTR_STATE_REG_OFFSET);
+        uint32_t usb_stat = REG32(USBDEV_BASE_ADDR + USBDEV_USBSTAT_REG_OFFSET);
+        LOG_INFO("I%4x-%8x", usb_irq_state, usb_stat);
       } else {
-        usb_simpleserial_send_byte(&ss_ctx[0], rcv_char);
-        usb_simpleserial_send_byte(&ss_ctx[1], rcv_char + 1);
+        usb_simpleserial_send_byte(&simple_serial0, rcv_char);
+        usb_simpleserial_send_byte(&simple_serial1, rcv_char + 1);
       }
-      gpio_write_all(rcv_char << 8);
+    }
+    if (say_hello && usb_chars_recved_total > 2) {
+      usb_send_str("Hello USB World!!!!", &simple_serial0);
+      say_hello = false;
+    }
+    // Signal that the simulation succeeded.
+    if (usb_chars_recved_total >= kExpectedUsbCharsRecved && !pass_signaled) {
+      LOG_INFO("PASS!");
+      pass_signaled = true;
     }
   }
+
+  LOG_INFO("USB recieved %d characters.", usb_chars_recved_total);
 }

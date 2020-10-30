@@ -9,28 +9,33 @@
  * input port: send address and data to the FIFO
  * clear_i clears the FIFO for the following cycle, including any new request
  */
+
+`include "prim_assert.sv"
+
 module ibex_fetch_fifo #(
   parameter int unsigned NUM_REQS = 2
 ) (
-    input  logic        clk_i,
-    input  logic        rst_ni,
+    input  logic                clk_i,
+    input  logic                rst_ni,
 
     // control signals
-    input  logic        clear_i,          // clears the contents of the FIFO
+    input  logic                clear_i,   // clears the contents of the FIFO
+    output logic [NUM_REQS-1:0] busy_o,
 
     // input port
-    input  logic        in_valid_i,
-    output logic        in_ready_o,
-    input  logic [31:0] in_addr_i,
-    input  logic [31:0] in_rdata_i,
-    input  logic        in_err_i,
+    input  logic                in_valid_i,
+    input  logic [31:0]         in_addr_i,
+    input  logic [31:0]         in_rdata_i,
+    input  logic                in_err_i,
 
     // output port
-    output logic        out_valid_o,
-    input  logic        out_ready_i,
-    output logic [31:0] out_addr_o,
-    output logic [31:0] out_rdata_o,
-    output logic        out_err_o
+    output logic                out_valid_o,
+    input  logic                out_ready_i,
+    output logic [31:0]         out_addr_o,
+    output logic [31:0]         out_addr_next_o,
+    output logic [31:0]         out_rdata_o,
+    output logic                out_err_o,
+    output logic                out_err_plus2_o
 );
 
   localparam int unsigned DEPTH = NUM_REQS+1;
@@ -45,12 +50,13 @@ module ibex_fetch_fifo #(
 
   logic                     pop_fifo;
   logic             [31:0]  rdata, rdata_unaligned;
-  logic                     err,   err_unaligned;
+  logic                     err,   err_unaligned, err_plus2;
   logic                     valid, valid_unaligned;
 
   logic                     aligned_is_compressed, unaligned_is_compressed;
 
   logic                     addr_incr_two;
+  logic [31:1]              instr_addr_next;
   logic [31:1]              instr_addr_d, instr_addr_q;
   logic                     instr_addr_en;
   logic                     unused_addr_in;
@@ -87,12 +93,18 @@ module ibex_fetch_fifo #(
                                         ((valid_q[0] & err_q[0]) |
                                          (in_err_i & (~valid_q[0] | ~unaligned_is_compressed)));
 
+  // Record when an error is caused by the second half of an unaligned 32bit instruction.
+  // Only needs to be correct when unaligned and if err_unaligned is set
+  assign err_plus2       = valid_q[1] ? (err_q[1] & ~err_q[0]) :
+                                        (in_err_i & valid_q[0] & ~err_q[0]);
+
   // An uncompressed unaligned instruction is only valid if both parts are available
   assign valid_unaligned = valid_q[1] ? 1'b1 :
                                         (valid_q[0] & in_valid_i);
 
-  assign unaligned_is_compressed    = rdata[17:16] != 2'b11;
-  assign aligned_is_compressed      = rdata[ 1: 0] != 2'b11;
+  // If there is an error, rdata is unknown
+  assign unaligned_is_compressed = (rdata[17:16] != 2'b11) | err;
+  assign aligned_is_compressed   = (rdata[ 1: 0] != 2'b11) & ~err;
 
   ////////////////////////////////////////
   // Instruction aligner (if unaligned) //
@@ -101,8 +113,9 @@ module ibex_fetch_fifo #(
   always_comb begin
     if (out_addr_o[1]) begin
       // unaligned case
-      out_rdata_o = rdata_unaligned;
-      out_err_o   = err_unaligned;
+      out_rdata_o     = rdata_unaligned;
+      out_err_o       = err_unaligned;
+      out_err_plus2_o = err_plus2;
 
       if (unaligned_is_compressed) begin
         out_valid_o = valid;
@@ -111,9 +124,10 @@ module ibex_fetch_fifo #(
       end
     end else begin
       // aligned case
-      out_rdata_o = rdata;
-      out_err_o   = err;
-      out_valid_o = valid;
+      out_rdata_o     = rdata;
+      out_err_o       = err;
+      out_err_plus2_o = 1'b0;
+      out_valid_o     = valid;
     end
   end
 
@@ -128,10 +142,12 @@ module ibex_fetch_fifo #(
   assign addr_incr_two = instr_addr_q[1] ? unaligned_is_compressed :
                                            aligned_is_compressed;
 
+  assign instr_addr_next = (instr_addr_q[31:1] +
+                            // Increment address by 4 or 2
+                            {29'd0,~addr_incr_two,addr_incr_two});
+
   assign instr_addr_d = clear_i ? in_addr_i[31:1] :
-                                  (instr_addr_q[31:1] +
-                                   // Increment address by 4 or 2
-                                   {29'd0,~addr_incr_two,addr_incr_two});
+                                  instr_addr_next;
 
   always_ff @(posedge clk_i) begin
     if (instr_addr_en) begin
@@ -139,20 +155,23 @@ module ibex_fetch_fifo #(
     end
   end
 
-  assign out_addr_o[31:1] = instr_addr_q[31:1];
-  assign out_addr_o[0]    = 1'b0;
+  // Output both PC of current instruction and instruction following. PC of instruction following is
+  // required for the branch predictor. It's used to fetch the instruction following a branch that
+  // was not-taken but (mis)predicted taken.
+  assign out_addr_next_o = {instr_addr_next, 1'b0};
+  assign out_addr_o      = {instr_addr_q, 1'b0};
 
   // The LSB of the address is unused, since all addresses are halfword aligned
   assign unused_addr_in = in_addr_i[0];
 
-  ////////////////
-  // input port //
-  ////////////////
+  /////////////////
+  // FIFO status //
+  /////////////////
 
-  // Accept data as long as our FIFO has space to accept the maximum number of outstanding
-  // requests. Note that the prefetch buffer does not count how many requests are actually
-  // outstanding, so space must be reserved for the maximum number.
-  assign in_ready_o = ~valid_q[DEPTH-NUM_REQS];
+  // Indicate the fill level of fifo-entries. This is used to determine when a new request can be
+  // made on the bus. The prefetch buffer only needs to know about the upper entries which overlap
+  // with NUM_REQS.
+  assign busy_o = valid_q[DEPTH-1:DEPTH-NUM_REQS];
 
   /////////////////////
   // FIFO management //
@@ -219,15 +238,13 @@ module ibex_fetch_fifo #(
   ////////////////
   // Assertions //
   ////////////////
-`ifndef VERILATOR
-  // must not push and pop simultaneously when FIFO full
-  assert property (@(posedge clk_i) disable iff (!rst_ni)
-      (in_valid_i && pop_fifo) |-> (!valid_q[DEPTH-1] || clear_i)) else
-    $display("Simultaneous pushing and popping not supported when FIFO full");
 
-  // must not push to FIFO when full
-  assert property (@(posedge clk_i) disable iff (!rst_ni)
-      (in_valid_i) |-> (!valid_q[DEPTH-1] || clear_i)) else
-    $display("Must not push when FIFO full");
-`endif
+  // Must not push and pop simultaneously when FIFO full.
+  `ASSERT(IbexFetchFifoPushPopFull,
+      (in_valid_i && pop_fifo) |-> (!valid_q[DEPTH-1] || clear_i))
+
+  // Must not push to FIFO when full.
+  `ASSERT(IbexFetchFifoPushFull,
+      (in_valid_i) |-> (!valid_q[DEPTH-1] || clear_i))
+
 endmodule

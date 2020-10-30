@@ -8,7 +8,22 @@
 // have to be generated using the reg_alert_handler.py script.
 //
 
-module alert_handler import alert_pkg::*; import prim_pkg::*; (
+`include "prim_assert.sv"
+
+module alert_handler
+  import alert_pkg::*;
+  import prim_alert_pkg::*;
+  import prim_esc_pkg::*;
+#(
+  // TODO: These constants have to be replaced by the silicon creator before taping out.
+  parameter logic [31:0]       LfsrSeed = 32'd1,
+  parameter logic [31:0][31:0] LfsrPerm = {
+    32'd04, 32'd11, 32'd25, 32'd03, 32'd15, 32'd16, 32'd01, 32'd10,
+    32'd02, 32'd22, 32'd07, 32'd00, 32'd23, 32'd28, 32'd30, 32'd19,
+    32'd27, 32'd12, 32'd24, 32'd26, 32'd14, 32'd21, 32'd18, 32'd05,
+    32'd13, 32'd08, 32'd29, 32'd31, 32'd20, 32'd06, 32'd09, 32'd17
+  }
+) (
   input                           clk_i,
   input                           rst_ni,
   // Bus Interface (device)
@@ -62,12 +77,15 @@ module alert_handler import alert_pkg::*; import prim_pkg::*; (
 
   logic [N_LOC_ALERT-1:0] loc_alert_trig;
 
-  logic [NAlerts-1:0]   alert_ping_en;
+  logic [NAlerts-1:0]   alert_ping_req;
   logic [NAlerts-1:0]   alert_ping_ok;
-  logic [N_ESC_SEV-1:0] esc_ping_en;
+  logic [N_ESC_SEV-1:0] esc_ping_req;
   logic [N_ESC_SEV-1:0] esc_ping_ok;
 
-  alert_handler_ping_timer i_ping_timer (
+  alert_handler_ping_timer #(
+    .LfsrSeed(LfsrSeed),
+    .LfsrPerm(LfsrPerm)
+  ) i_ping_timer (
     .clk_i,
     .rst_ni,
     .entropy_i,
@@ -79,8 +97,8 @@ module alert_handler import alert_pkg::*; import prim_pkg::*; (
     // this determines the range of the randomly generated
     // wait period between ping. maximum mask width is PING_CNT_DW.
     .wait_cyc_mask_i    ( PING_CNT_DW'(24'hFFFFFF)     ),
-    .alert_ping_en_o    ( alert_ping_en                ),
-    .esc_ping_en_o      ( esc_ping_en                  ),
+    .alert_ping_req_o   ( alert_ping_req               ),
+    .esc_ping_req_o     ( esc_ping_req                 ),
     .alert_ping_ok_i    ( alert_ping_ok                ),
     .esc_ping_ok_i      ( esc_ping_ok                  ),
     .alert_ping_fail_o  ( loc_alert_trig[0]            ),
@@ -101,7 +119,7 @@ module alert_handler import alert_pkg::*; import prim_pkg::*; (
     ) i_alert_receiver (
       .clk_i                              ,
       .rst_ni                             ,
-      .ping_en_i    ( alert_ping_en[k]   ),
+      .ping_req_i   ( alert_ping_req[k]   ),
       .ping_ok_o    ( alert_ping_ok[k]   ),
       .integ_fail_o ( alert_integfail[k] ),
       .alert_o      ( alert_trig[k]      ),
@@ -123,7 +141,6 @@ module alert_handler import alert_pkg::*; import prim_pkg::*; (
     .loc_alert_en_i    ( reg2hw_wrap.loc_alert_en    ),
     .alert_class_i     ( reg2hw_wrap.alert_class     ),
     .loc_alert_class_i ( reg2hw_wrap.loc_alert_class ),
-    .class_en_i        ( reg2hw_wrap.class_en        ),
     .alert_cause_o     ( hw2reg_wrap.alert_cause     ),
     .loc_alert_cause_o ( hw2reg_wrap.loc_alert_cause ),
     .class_trig_o      ( hw2reg_wrap.class_trig      )
@@ -134,12 +151,13 @@ module alert_handler import alert_pkg::*; import prim_pkg::*; (
   ////////////////////////////////////
 
   logic [N_CLASSES-1:0] class_accum_trig;
-  logic [N_CLASSES-1:0][N_ESC_SEV-1:0] class_esc_sig_en;
+  logic [N_CLASSES-1:0][N_ESC_SEV-1:0] class_esc_sig_req;
 
   for (genvar k = 0; k < N_CLASSES; k++) begin : gen_classes
     alert_handler_accu i_accu (
       .clk_i,
       .rst_ni,
+      .class_en_i   ( reg2hw_wrap.class_en[k]           ),
       .clr_i        ( reg2hw_wrap.class_clr[k]          ),
       .class_trig_i ( hw2reg_wrap.class_trig[k]         ),
       .thresh_i     ( reg2hw_wrap.class_accum_thresh[k] ),
@@ -163,7 +181,7 @@ module alert_handler import alert_pkg::*; import prim_pkg::*; (
       .esc_trig_o       ( hw2reg_wrap.class_esc_trig[k]    ),
       .esc_cnt_o        ( hw2reg_wrap.class_esc_cnt[k]     ),
       .esc_state_o      ( hw2reg_wrap.class_esc_state[k]   ),
-      .esc_sig_en_o     ( class_esc_sig_en[k]              )
+      .esc_sig_req_o    ( class_esc_sig_req[k]             )
     );
   end
 
@@ -171,24 +189,24 @@ module alert_handler import alert_pkg::*; import prim_pkg::*; (
   // Escalation Senders //
   ////////////////////////
 
-  logic [N_ESC_SEV-1:0] esc_sig_en;
+  logic [N_ESC_SEV-1:0] esc_sig_req;
   logic [N_ESC_SEV-1:0] esc_integfail;
-  logic [N_ESC_SEV-1:0][N_CLASSES-1:0] esc_sig_en_trsp;
+  logic [N_ESC_SEV-1:0][N_CLASSES-1:0] esc_sig_req_trsp;
 
   for (genvar k = 0; k < N_ESC_SEV; k++) begin : gen_esc_sev
     for (genvar j = 0; j < N_CLASSES; j++) begin : gen_transp
-      assign esc_sig_en_trsp[k][j] = class_esc_sig_en[j][k];
+      assign esc_sig_req_trsp[k][j] = class_esc_sig_req[j][k];
     end
 
-    assign esc_sig_en[k] = |esc_sig_en_trsp[k];
+    assign esc_sig_req[k] = |esc_sig_req_trsp[k];
 
     prim_esc_sender i_esc_sender (
       .clk_i,
       .rst_ni,
-      .ping_en_i    ( esc_ping_en[k]   ),
+      .ping_req_i   ( esc_ping_req[k]  ),
       .ping_ok_o    ( esc_ping_ok[k]   ),
       .integ_fail_o ( esc_integfail[k] ),
-      .esc_en_i     ( esc_sig_en[k]    ),
+      .esc_req_i    ( esc_sig_req[k]   ),
       .esc_rx_i     ( esc_rx_i[k]      ),
       .esc_tx_o     ( esc_tx_o[k]      )
     );
@@ -201,15 +219,15 @@ module alert_handler import alert_pkg::*; import prim_pkg::*; (
   ////////////////
 
   // check whether all outputs have a good known state after reset
-  `ASSERT_KNOWN(TlDValidKnownO_A, tl_o.d_valid, clk_i, !rst_ni)
-  `ASSERT_KNOWN(TlAReadyKnownO_A, tl_o.a_ready, clk_i, !rst_ni)
-  `ASSERT_KNOWN(IrqAKnownO_A, intr_classa_o, clk_i, !rst_ni)
-  `ASSERT_KNOWN(IrqBKnownO_A, intr_classb_o, clk_i, !rst_ni)
-  `ASSERT_KNOWN(IrqCKnownO_A, intr_classc_o, clk_i, !rst_ni)
-  `ASSERT_KNOWN(IrqDKnownO_A, intr_classd_o, clk_i, !rst_ni)
-  `ASSERT_KNOWN(CrashdumpKnownO_A, crashdump_o, clk_i, !rst_ni)
-  `ASSERT_KNOWN(AckPKnownO_A, alert_rx_o, clk_i, !rst_ni)
-  `ASSERT_KNOWN(EscPKnownO_A, esc_tx_o, clk_i, !rst_ni)
+  `ASSERT_KNOWN(TlDValidKnownO_A, tl_o.d_valid)
+  `ASSERT_KNOWN(TlAReadyKnownO_A, tl_o.a_ready)
+  `ASSERT_KNOWN(IrqAKnownO_A, intr_classa_o)
+  `ASSERT_KNOWN(IrqBKnownO_A, intr_classb_o)
+  `ASSERT_KNOWN(IrqCKnownO_A, intr_classc_o)
+  `ASSERT_KNOWN(IrqDKnownO_A, intr_classd_o)
+  `ASSERT_KNOWN(CrashdumpKnownO_A, crashdump_o)
+  `ASSERT_KNOWN(AckPKnownO_A, alert_rx_o)
+  `ASSERT_KNOWN(EscPKnownO_A, esc_tx_o)
 
   // this restriction is due to specifics in the ping selection mechanism
   `ASSERT_INIT(CheckNAlerts,   NAlerts  < (256 - N_CLASSES))

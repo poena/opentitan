@@ -5,7 +5,7 @@
 package dv_utils_pkg;
   // dep packages
   import uvm_pkg::*;
-  import top_pkg::*;
+  import bus_params_pkg::*;
 
   // macro includes
   `include "dv_macros.svh"
@@ -14,7 +14,6 @@ package dv_utils_pkg;
   // common parameters used across all benches
   parameter int NUM_MAX_INTERRUPTS  = 32;
   parameter int NUM_MAX_ALERTS      = 32;
-  parameter int NUM_ALERT_PINS      = 10;
 
   // types & variables
   typedef bit [31:0] uint;
@@ -25,19 +24,7 @@ package dv_utils_pkg;
 
   // typedef parameterized pins_if for ease of implementation for interrupts and alerts
   typedef virtual pins_if #(NUM_MAX_INTERRUPTS) intr_vif;
-  typedef virtual pins_if #(NUM_MAX_ALERTS)     alerts_vif;
   typedef virtual pins_if #(1)                  devmode_vif;
-  typedef virtual pins_if #(1)                  tlul_assert_ctrl_vif;
-
-  // alert io signals
-  typedef enum {
-    PingEn    = 0,
-    PingOk    = 1,
-    IntegFail = 2,
-    Alert     = 3,
-    AlertRx   = 4, // rx has 4 bits
-    AlertTx   = 8  // tx has 2 bits
-  } alert_pin_e;
 
   // interface direction / mode - Host or Device
   typedef enum bit {
@@ -70,10 +57,45 @@ package dv_utils_pkg;
   typedef struct {
     uvm_reg_addr_t start_addr;
     uvm_reg_addr_t end_addr;
-  } mem_addr_s;
+  } addr_range_t;
+
+  // Enum representing a bus operation type - read or write.
+  typedef enum bit {
+    BusOpWrite = 1'b0,
+    BusOpRead  = 1'b1
+  } bus_op_e;
+
+  // Enum representing a type of host requests - read only, write only or random read & write
+  typedef enum int {
+    HostReqNone      = 0,
+    HostReqReadOnly  = 1,
+    HostReqWriteOnly = 2,
+    HostReqReadWrite = 3
+  } host_req_type_e;
 
   string msg_id = "dv_utils_pkg";
 
+  // return the smaller value of 2 inputs
+  function automatic int min2(int a, int b);
+      return (a < b) ? a : b;
+  endfunction
+
+  // return the bigger value of 2 inputs
+  function automatic int max2(int a, int b);
+    return (a > b) ? a : b;
+  endfunction
+
+  // get absolute value of the input. Usage: absolute(val) or absolute(a - b)
+  function automatic uint absolute(int val);
+    return val >= 0 ? val : -val;
+  endfunction
+
+  // endian swap
+  function automatic logic [31:0] endian_swap(logic [31:0] data);
+    return {<<8{data}};
+  endfunction
+
+`ifdef UVM
   // Simple function to set max errors before quitting sim
   function automatic void set_max_quit_count(int n);
     uvm_report_server report_server = uvm_report_server::get_server();
@@ -98,24 +120,16 @@ package dv_utils_pkg;
 
   // get masked data based on provided byte mask; if csr reg handle is provided (optional) then
   // masked bytes from csr's mirrored value are returned, else masked bytes are 0's
-  function automatic bit [TL_DW-1:0] get_masked_data(bit [TL_DW-1:0]  data,
-                                                     bit [TL_DBW-1:0] mask,
-                                                     uvm_reg          csr = null);
-    bit [TL_DW-1:0] csr_data;
+  function automatic bit [bus_params_pkg::BUS_DW-1:0]
+      get_masked_data(bit [bus_params_pkg::BUS_DW-1:0] data,
+                      bit [bus_params_pkg::BUS_DBW-1:0] mask,
+                      uvm_reg csr = null);
+    bit [bus_params_pkg::BUS_DW-1:0] csr_data;
     csr_data = (csr != null) ? csr.get_mirrored_value() : '0;
     get_masked_data = data;
-    foreach (mask[i])
+    foreach (mask[i]) begin
       if (~mask[i]) get_masked_data[i * 8 +: 8] = csr_data[i * 8 +: 8];
-  endfunction
-
-  // get absolute value of the input. Usage: absolute(val) or absolute(a - b)
-  function automatic uint absolute(int val);
-    return val >= 0 ? val : -val;
-  endfunction
-
-  // endian swap
-  function automatic logic [31:0] endian_swap(logic [31:0] data);
-    return {<<8{data}};
+    end
   endfunction
 
   // create a sequence by name and return the handle of uvm_sequence
@@ -136,8 +150,11 @@ package dv_utils_pkg;
     end
     return seq;
   endfunction
+`endif
 
   // sources
+`ifdef UVM
   `include "dv_report_server.sv"
+`endif
 
 endpackage

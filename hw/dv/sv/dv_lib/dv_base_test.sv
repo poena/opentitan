@@ -32,6 +32,8 @@ class dv_base_test #(type CFG_T = dv_base_env_cfg,
 
     // knob to en/dis scb (enabled by default)
     void'($value$plusargs("en_scb=%0b", cfg.en_scb));
+    void'($value$plusargs("en_scb_tl_err_chk=%0b", cfg.en_scb_tl_err_chk));
+    void'($value$plusargs("en_scb_mem_chk=%0b", cfg.en_scb_mem_chk));
     // knob to cfg all agents with zero delays
     void'($value$plusargs("zero_delays=%0b", cfg.zero_delays));
   endfunction : build_phase
@@ -61,12 +63,11 @@ class dv_base_test #(type CFG_T = dv_base_env_cfg,
     test_seq.set_sequencer(env.virtual_sequencer);
     `DV_CHECK_RANDOMIZE_FATAL(test_seq)
 
-    `uvm_info(`gfn, {"starting vseq ", test_seq_s}, UVM_MEDIUM)
-    phase.raise_objection(this);
+    `uvm_info(`gfn, {"Starting test sequence ", test_seq_s}, UVM_MEDIUM)
+    phase.raise_objection(this, $sformatf("%s objection raised", `gn));
     test_seq.start(env.virtual_sequencer);
-    phase.drop_objection(this);
-    phase.phase_done.display_objections();
-    `uvm_info(`gfn, {"finished vseq ", test_seq_s}, UVM_MEDIUM)
+    phase.drop_objection(this, $sformatf("%s objection dropped", `gn));
+    `uvm_info(`gfn, {"Finished test sequence ", test_seq_s}, UVM_MEDIUM)
   endtask
 
   // TODO: add default report_phase implementation
